@@ -1,0 +1,21 @@
+# OS and editor noise
+Thumbs.db
+desktop.ini
+.DS_Store
+.vscode/
+.idea/
+
+# never publish these — this repo is public
+*.local.*
+secrets*
+*secret*
+sheet-url*
+apps-script-url*
+backup*.json
+backup*.txt
+*.backup
+
+# scratch
+harness.html
+check.js
+*.tmp
