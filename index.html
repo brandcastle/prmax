@@ -455,7 +455,7 @@ textarea{width:100%;min-height:150px;font-family:var(--f-mono);font-size:12px;
    ====================================================================== */
 
 const KEY = "ironledger.v1";
-const BUILD = "2026.08.20.1";   /* keep in step with version.txt */
+const BUILD = "2026.08.20.3";   /* keep in step with version.txt */
 
 /* ---------------- exercise library ---------------- */
 const EX = [
@@ -595,7 +595,7 @@ function registerCustom(){
 registerCustom();
 let ui = {tab:"today", openEx:null, histEx:null,
           logMode:"cal", calMonth:null, calDay:null,
-          tplDay:"upper", freshSet:false, activeSession:null};
+          tplDay:"upper", freshSet:false, activeSession:null, showSecrets:false};
 
 function load(){
   let d = null;
@@ -612,6 +612,7 @@ function load(){
   if(!d.targets) d.targets = defaultTargets();
   if(!d.exGoals) d.exGoals = {};
   if(!d.customEx) d.customEx = [];
+  if(!d.sync) d.sync = {url:"", token:"", synced:{}, lastOk:null, lastErr:null};
   if(!d.name) d.name = "there";
   if(!d.restLen) d.restLen = 90;
   if(!d.themeSet){ d.theme = "light"; d.themeSet = true; }   /* white by default */
@@ -623,10 +624,135 @@ function save(){
     S.savedAt = Date.now();
     localStorage.setItem(KEY, JSON.stringify(S));
     lastSaveOk = true;
+    scheduleSync();
   }catch(e){
     lastSaveOk = false;
     console.warn("save failed", e);
   }
+}
+
+/* the backup is for pasting around, so it must not carry the Sheet URL or secret */
+function exportable(){
+  const copy = JSON.parse(JSON.stringify(S));
+  if(copy.sync){ copy.sync.url = ""; copy.sync.token = ""; copy.sync.lastErr = null; }
+  return copy;
+}
+
+/* ============ Google Sheet mirror =====================================
+   Twelve different places mutate sessions, and every one calls save().
+   Rather than hook all twelve (and miss one), work out what changed by
+   comparing each session against a fingerprint of what the Sheet holds.
+   Self-healing: five offline edits collapse into one push of final state. */
+
+/* strip anything secret out of a string before it is stored or displayed */
+function scrub(msg){
+  const c = S.sync || {};
+  let out = String(msg);
+  if(c.url)   out = out.split(c.url).join("[url]");
+  if(c.token) out = out.split(c.token).join("[secret]");
+  return out;
+}
+
+/* only an https Apps Script /exec endpoint — http would send the log in the
+   clear, and a wrong host would send it to a stranger */
+function validEndpoint(u){
+  try{
+    const x = new URL(u);
+    return x.protocol === "https:"
+        && x.hostname === "script.google.com"
+        && /\/exec$/.test(x.pathname);
+  }catch(e){ return false; }
+}
+
+function syncCfg(){ return (S.sync = S.sync || {url:"",token:"",synced:{},lastOk:null,lastErr:null}); }
+const syncOn = () => !!(syncCfg().url && syncCfg().token);
+
+/* one row per set, matching HEADERS in sheet-sync.gs */
+function sheetRows(sess){
+  const rows = [];
+  sess.entries.forEach(e => {
+    const def = exById[e.ex] || {n:e.ex, m:"", equip:""};
+    e.sets.forEach((x, i) => rows.push([
+      sess.date,
+      sess.day ? (dayById[sess.day] || {n:sess.day}).n : "",
+      def.n,
+      (muscleById[def.m] || {n:def.m || ""}).n,
+      def.equip || "",
+      isTime(e.ex) ? "" : (x.w === 0 ? "BW" : x.w),
+      isTime(e.ex) ? "" : x.r,
+      isTime(e.ex) ? x.t : "",
+      i + 1
+    ]));
+  });
+  return rows;
+}
+
+function fingerprint(sess){
+  const str = JSON.stringify(sheetRows(sess));
+  let h = 5381;
+  for(let i = 0; i < str.length; i++) h = ((h * 33) ^ str.charCodeAt(i)) >>> 0;
+  return h.toString(36) + ":" + str.length;
+}
+
+/* what the Sheet is missing right now */
+function syncDiff(){
+  const cfg = syncCfg(), ops = [];
+  const live = {};
+  S.sessions.forEach(x => { live[x.date] = x; });
+  for(const d in live){
+    const fp = fingerprint(live[d]);
+    if(cfg.synced[d] !== fp) ops.push({action:"upsert", date:d, rows:sheetRows(live[d]), fp});
+  }
+  for(const d in cfg.synced){
+    if(!live[d]) ops.push({action:"delete", date:d, rows:[], fp:null});
+  }
+  return ops;
+}
+const syncPending = () => (syncOn() ? syncDiff().length : 0);
+
+let syncing = null;                 /* holds the in-flight push, if any */
+async function flushSync(manual){
+  const cfg = syncCfg();
+  if(!syncOn()) return;
+  if(!validEndpoint(cfg.url)){ cfg.lastErr = "endpoint is not a valid https Apps Script URL"; return; }
+  if(syncing){
+    /* a background push is already running. Tapping Sync now must not
+       silently no-op, so wait for it and then push whatever is still left. */
+    if(!manual) return;
+    await syncing;
+    if(!syncDiff().length) return;
+  }
+  const ops = syncDiff();
+  if(!ops.length){ if(manual){ cfg.lastErr = null; save(); render(); } return; }
+  let done;
+  syncing = new Promise(r => { done = r; });
+  try{
+    /* text/plain keeps this a "simple" request, so the browser skips the CORS
+       preflight that Apps Script cannot answer. Without it, nothing works. */
+    const res = await fetch(cfg.url, {
+      method:"POST",
+      headers:{"Content-Type":"text/plain;charset=utf-8"},
+      body: JSON.stringify({token: cfg.token, ops: ops.map(o => ({action:o.action, date:o.date, rows:o.rows}))})
+    });
+    const out = await res.json();
+    if(!out.ok) throw new Error(out.error || "rejected");
+    ops.forEach(o => { if(o.action === "delete") delete cfg.synced[o.date]; else cfg.synced[o.date] = o.fp; });
+    cfg.lastOk = Date.now(); cfg.lastErr = null;
+  }catch(err){
+    /* browsers don't normally put the URL in a fetch error, but don't rely on it */
+    cfg.lastErr = scrub(String(err.message || err));
+  }finally{
+    syncing = null; done();
+    save();
+    if(ui.tab === "setup") render();
+  }
+}
+
+let syncTimer = null;
+function scheduleSync(){
+  if(!syncOn()) return;
+  clearTimeout(syncTimer);
+  syncTimer = setTimeout(() => flushSync(false), 2000);   /* never blocks logging */
 }
 
 /* what is actually on disk right now — used to prove a delete stuck */
@@ -1293,6 +1419,42 @@ function viewSetup(){
       </div>
     </div>
 
+    <div class="eyebrow">Google Sheet</div>
+    <div class="card pad" style="display:flex;flex-direction:column;gap:9px">
+      <div class="row-between">
+        <div class="step-label">Live mirror of your log</div>
+        <span class="saved" id="syncSaved">Saved</span>
+      </div>
+      <div class="note" style="font-size:13px;color:var(--muted);line-height:1.5">
+        Paste the web app URL from <b>sheet-sync.gs</b> and the secret you set inside it. Sets
+        you log appear in the Sheet; sessions you delete disappear from it. Both stay on this
+        phone — they are never included in a backup and never go in the repo.
+      </div>
+      <input class="txt" id="syncUrl" type="${ui.showSecrets ? "url" : "password"}"
+        inputmode="url" autocomplete="off" spellcheck="false"
+        placeholder="https://script.google.com/…/exec" value="${esc(syncCfg().url)}">
+      <input class="txt" id="syncToken" type="${ui.showSecrets ? "text" : "password"}"
+        autocomplete="off" spellcheck="false"
+        placeholder="the secret from the script" value="${esc(syncCfg().token)}">
+      <button class="btn" id="syncReveal" style="min-height:40px;font-size:13px">
+        ${ui.showSecrets ? "Hide" : "Show"} URL and secret</button>
+      ${ui.showSecrets ? `<div class="note" style="font-size:12.5px;color:var(--stall)">
+        Visible now — don't screenshot this screen while these are showing.</div>` : ""}
+      <div class="btn-row">
+        <button class="btn" id="syncNow" ${syncOn() ? "" : "disabled style=opacity:.5"}>Sync now</button>
+        <button class="btn" id="syncAll" ${syncOn() ? "" : "disabled style=opacity:.5"}>Resend all</button>
+      </div>
+      <div class="hist-body">
+        <div class="hist-line"><span class="n">Status</span><span class="v">${
+          !syncOn() ? "not set up" : syncCfg().lastErr ? "error" : syncCfg().lastOk ? "connected" : "not tried yet"}</span></div>
+        <div class="hist-line"><span class="n">Waiting to send</span><span class="v">${syncPending()}</span></div>
+        <div class="hist-line"><span class="n">Last synced</span><span class="v">${
+          syncCfg().lastOk ? new Date(syncCfg().lastOk).toLocaleString() : "never"}</span></div>
+        ${syncCfg().lastErr ? `<div class="hist-line"><span class="n">Last error</span>
+          <span class="v" style="color:var(--stall)">${esc(syncCfg().lastErr)}</span></div>` : ""}
+      </div>
+    </div>
+
     <div class="eyebrow">Storage</div>
     <div class="card pad">
       <div class="hist-body">
@@ -1317,7 +1479,7 @@ function viewSetup(){
     <div class="eyebrow">Backup</div>
     <div class="card pad" style="display:flex;flex-direction:column;gap:10px">
       <div class="note" style="font-size:13.5px">Your log lives only on this device. Copy this somewhere safe now and then.</div>
-      <textarea id="dump" readonly>${esc(JSON.stringify(S))}</textarea>
+      <textarea id="dump" readonly>${esc(JSON.stringify(exportable()))}</textarea>
       <button class="btn btn-wide" id="copyDump">Copy backup</button>
     </div>
     <div class="eyebrow">Restore</div>
@@ -2056,6 +2218,48 @@ function wire(){
     rl.value = setRest(num(rl.value) + (b.dataset.rest === "+" ? 15 : -15));
   });
 
+  const su = document.getElementById("syncUrl"), st = document.getElementById("syncToken");
+  const commitSync = () => {
+    const c = syncCfg();
+    if(su){
+      const v = su.value.trim();
+      if(v && !validEndpoint(v)){
+        notice("That URL won't work",
+          "It needs to be the https://script.google.com/... /exec address from Deploy. " +
+          "Anything else would send your training data somewhere it shouldn't go.");
+        su.value = c.url;
+        return;
+      }
+      c.url = v;
+    }
+    if(st) c.token = st.value.trim();
+    save(); flash("syncSaved");
+  };
+  if(su){ su.onchange = commitSync; su.onblur = commitSync; }
+  if(st){ st.onchange = commitSync; st.onblur = commitSync; }
+
+  const sr = document.getElementById("syncReveal");
+  if(sr) sr.onclick = () => { ui.showSecrets = !ui.showSecrets; render(); };
+
+  const sn = document.getElementById("syncNow");
+  if(sn && !sn.disabled) sn.onclick = async () => {
+    sn.textContent = "Syncing…";
+    await flushSync(true);
+    sn.textContent = "Sync now";
+    if(syncCfg().lastErr) notice("Sync failed", syncCfg().lastErr +
+      " — check the URL and the secret match the script, and that it is deployed with access set to Anyone.");
+    render();
+  };
+
+  const sa = document.getElementById("syncAll");
+  if(sa && !sa.disabled) sa.onclick = () => askConfirm({
+    title:"Resend everything",
+    kicker:S.sessions.length + " sessions",
+    line:"Rewrites every session into the Sheet. Use this if the Sheet and the app have drifted apart.",
+    yes:"Resend all",
+    onYes(){ syncCfg().synced = {}; save(); flushSync(true); }
+  });
+
   const wipe = document.getElementById("wipeAll");
   if(wipe) wipe.onclick = () => askConfirm({
     title:"Erase everything",
@@ -2093,9 +2297,13 @@ function wire(){
       line:"This replaces everything currently in the app.",
       yes:"Replace my log", danger:true,
       onYes(){
+        const keep = syncCfg();                    /* this device's own credentials */
         S = d;
         if(!S.templates) S.templates = defaultTemplates();
         if(!S.name) S.name = "there";
+        S.sync = Object.assign({url:"",token:"",synced:{},lastOk:null,lastErr:null},
+                               S.sync || {}, {url:keep.url, token:keep.token});
+        S.sync.synced = {};                        /* restored data must be re-pushed */
         save(); applyTheme(); render();
       }
     });
@@ -2103,6 +2311,7 @@ function wire(){
 }
 
 document.querySelectorAll(".tab").forEach(t => t.onclick = () => {
+  ui.showSecrets = false;              /* never leave credentials on screen */
   ui.tab = t.dataset.tab;
   if(t.dataset.tab === "history"){ ui.histEx = null; ui.calDay = null; }
   render();
@@ -2180,7 +2389,12 @@ async function checkBuild(){
   }catch(e){ /* offline — nothing to do */ }
 }
 checkBuild();
-document.addEventListener("visibilitychange", () => { if(!document.hidden) checkBuild(); });
+flushSync(false);
+document.addEventListener("visibilitychange", () => {
+  if(document.hidden && ui.showSecrets){ ui.showSecrets = false; render(); }
+  if(!document.hidden){ checkBuild(); flushSync(false); }
+});
+window.addEventListener("online", () => flushSync(false));
 
 applyTheme();
 matchMedia("(prefers-color-scheme:dark)").addEventListener("change", applyTheme);

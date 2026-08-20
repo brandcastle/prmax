@@ -40,6 +40,30 @@ and works without a connection.
 - Nothing personal is in this repository — it holds the app, not the training data.
 - **Never commit a Google Sheets web-app URL or any other secret here.** This repo is public.
 
+## Google Sheet sync (optional)
+
+`sheet-sync.gs` mirrors your log into a private Google Sheet: sets you log appear, sessions you
+delete disappear.
+
+1. Make a new Google Sheet.
+2. **Extensions → Apps Script**, replace everything with `sheet-sync.gs`. Edit `setSecret()`
+   to your own long random string, run it once from the editor, then blank the string back
+   out and save — the secret lives in Script Properties, not in the file.
+3. **Deploy → New deployment → Web app** — *Execute as: Me*, *Who has access: Anyone*. Copy the
+   `/exec` URL.
+4. In PR Max: **Setup → Google Sheet** — paste the URL and the same secret, then **Sync now**.
+
+"Anyone" is required because the app sends a plain request with no Google login. What protects
+the data instead: the script has **no read path** — no `doGet`, nothing that returns rows — so
+the URL cannot be used to read your log, only to write. Every request must also carry the
+secret. The Sheet itself stays private to your Google account.
+
+**Never set the Sheet itself to "anyone with the link can view."** No code here can protect
+you from that, and it would make everything public.
+
+**The URL and secret live only on your phone.** They are stripped from the Setup → Copy backup
+text, and must never be committed here.
+
 ## Credits
 
 Exercise reference data (names, muscle groups, equipment) adapted from
