@@ -169,9 +169,15 @@ button{font:inherit;color:inherit;cursor:pointer}
 .log-name{font-family:var(--f-disp);font-size:27px;font-weight:600;text-transform:uppercase;
   letter-spacing:.03em;line-height:1.05}
 .log-meta{font-family:var(--f-mono);font-size:12px;color:var(--muted);margin-top:2px}
-.target{font-family:var(--f-mono);font-size:13px;color:var(--text);
-  background:var(--surface-2);border:1px solid var(--line);border-radius:9px;
-  padding:10px 11px;line-height:1.55}
+.target{background:var(--surface-2);border:1px solid var(--line);border-radius:9px;
+  padding:10px 11px;display:flex;flex-direction:column;gap:2px}
+.hint-line{font-family:var(--f-mono);line-height:1.45}
+.hint-lead{font-size:13.5px;font-weight:600;color:var(--text)}
+.hint-body{font-size:12.5px;color:var(--muted)}
+.hint-pace{font-size:12.5px;font-weight:600;color:var(--accent);margin-top:2px}
+.hint-pace.stall{color:var(--stall)}
+.hint-pace.ready{color:var(--accent)}
+.hint-note{font-size:12px;color:var(--faint);margin-top:3px;font-style:italic}
 .setline{display:flex;gap:7px;flex-wrap:wrap}
 .setpill{font-family:var(--f-mono);font-size:13px;font-weight:500;padding:6px 10px;border-radius:6px;
   background:var(--surface-2);color:var(--text);font-variant-numeric:tabular-nums;
@@ -332,6 +338,11 @@ button{font:inherit;color:inherit;cursor:pointer}
   -webkit-tap-highlight-color:transparent;transition:transform .09s ease}
 .seg button:active{transform:scale(.95)}
 .seg button.on{background:var(--accent-bright);border-color:var(--accent-bright);color:var(--on-lime)}
+.goal-row{display:grid;grid-template-columns:1fr 96px;gap:10px;align-items:center;
+  padding:11px 16px;border-bottom:1px solid var(--line)}
+.goal-label{font-size:15px;font-weight:500}
+.goal-label small{display:block;font-family:var(--f-mono);font-size:11px;color:var(--muted);
+  font-weight:400;margin-top:2px;letter-spacing:.02em}
 .tgt-row{display:grid;grid-template-columns:1fr 62px 12px 62px;gap:8px;align-items:center;
   padding:8px 12px;border-bottom:1px solid var(--line)}
 .tgt-name{font-size:14.5px;font-weight:500;min-width:0}
@@ -479,6 +490,21 @@ const MUSCLES = [
 ];
 const muscleById = Object.fromEntries(MUSCLES.map(m => [m.id, m]));
 
+/* your per-exercise goals layered over the catalogue defaults.
+   Every consumer of rl / rh / inc must go through this. */
+function defFor(id){
+  const base = exById[id];
+  if(!base) return base;
+  const o = S.exGoals && S.exGoals[id];
+  if(!o) return base;
+  return Object.assign({}, base, {
+    rl:  isFinite(o.rl)  ? o.rl  : base.rl,
+    rh:  isFinite(o.rh)  ? o.rh  : base.rh,
+    inc: isFinite(o.inc) ? o.inc : base.inc,
+  });
+}
+const goalsEdited = id => !!(S.exGoals && S.exGoals[id]);
+
 function defaultTargets(){
   return Object.fromEntries(MUSCLES.map(m => [m.id, {lo:m.lo, hi:m.hi}]));
 }
@@ -532,6 +558,7 @@ function load(){
   d.pruned = before !== d.sessions.length;
   if(!d.templates) d.templates = defaultTemplates();
   if(!d.targets) d.targets = defaultTargets();
+  if(!d.exGoals) d.exGoals = {};
   if(!d.name) d.name = "there";
   if(!d.restLen) d.restLen = 90;
   if(!d.themeSet){ d.theme = "light"; d.themeSet = true; }   /* white by default */
@@ -652,36 +679,83 @@ function exHistory(exId){
 }
 
 /* progression: hold the load until the top of the range lands on two sets */
+/* how a load reads in prose — "bodyweight", not "BW lb" */
+function loadPhrase(exId, v){
+  if(v === 0) return "bodyweight";
+  const u = (exById[exId] && exById[exId].u) || "lb";
+  return w(v) + " " + u;
+}
+const repList = arr =>
+  arr.length === 1 ? arr[0] + " reps"
+  : arr.slice(0,-1).join(", ") + " and " + arr[arr.length-1] + " reps";
+
 function progression(exId){
-  const def = exById[exId], h = exHistory(exId);
+  const def = defFor(exId), h = exHistory(exId);
   const past = h.filter(s => s.date !== todayISO());
 
   if(isTime(exId)){
     return past.length
-      ? {state:"time", load:null, msg:"Last time: " + past[0].sets.map(x => x.t + " min").join(", ")}
-      : {state:"new", load:null, msg:"First one — log the minutes when you're done."};
+      ? {state:"time", load:null, lines:["Last time: " + past[0].sets.map(x => x.t + " min").join(", ") + "."]}
+      : {state:"new", load:null, lines:["First one.", "Log the minutes when you're done."]};
   }
-  if(!past.length) return {state:"new", load:null, msg:"First time — pick a load you can hold for " + def.rl + "."};
+  if(!past.length){
+    return {state:"new", load:null, lines:[
+      "First time on this one.",
+      "Pick a load you can manage for " + def.rl + " reps."]};
+  }
 
   const last = past[0], load = last.sets[0].w;
   const atLoad = [];
   for(const s of past){ if(s.sets[0].w === load) atLoad.push(s); else break; }
 
-  if(last.sets.filter(x => x.w === load && x.r >= def.rh).length >= 2){
-    return {state:"ready", load:load + def.inc, msg:"Earned it — " + def.rh + "×2 last session. Go to " + w(load + def.inc) + "."};
+  /* your best two sets at the working load — BOTH must reach the top of the range */
+  const atLoad2 = last.sets.filter(x => x.w === load);
+  const working = [...atLoad2].sort((a,b) => b.r - a.r).slice(0,2);
+  const hits = working.filter(x => x.r >= def.rh).length;
+  const shown = repList(atLoad2.map(x => x.r));   /* shown in the order you did them */
+
+  if(working.length >= 2 && hits >= 2){
+    const next = load + def.inc;
+    return {state:"ready", load:next, lines:[
+      "Move up to " + loadPhrase(exId, next) + " today.",
+      "Your best two sets both hit " + def.rh + " reps last time — that's the trigger.",
+      "Reps reset. Work back up to " + def.rh + "."]};
   }
+
   if(atLoad.length >= 3){
     const tops = atLoad.map(s => Math.max(...s.sets.map(x => x.r)));
     if(tops[0] <= tops[tops.length-1]){
-      return {state:"stall", load,
-        msg:"Stalled — " + atLoad.length + " sessions at " + w(load) + ", top set " +
-            tops[tops.length-1] + " → " + tops[0] + ". Swap it or drop 10%."};
+      return {state:"stall", load, lines:[
+        "Stalled at " + loadPhrase(exId, load) + ".",
+        atLoad.length + " sessions here; your best set went " +
+          tops[tops.length-1] + " → " + tops[0] + " reps.",
+        "Swap the exercise, or drop about 10% and rebuild."]};
     }
   }
-  return {state:"hold", load,
-    msg:"Hold " + w(load) + ". Last: " + last.sets.map(x => x.r).slice(0,2).join(" / ") +
-        " — need " + def.rh + "×2 to move up."};
+
+  let pace;
+  if(working.length < 2){
+    pace = "Log 2 sets at " + def.rh + " reps to move up.";
+  } else if(hits === 1){
+    pace = "One more set at " + def.rh + " reps and the load goes up.";
+  } else {
+    const gap = def.rh - Math.max(...working.map(x => x.r));
+    pace = gap + (gap === 1 ? " rep" : " reps") + " to go on your best set.";
+  }
+
+  return {state:"hold", load, lines:[
+    "Keep " + loadPhrase(exId, load) + " this session.",
+    "Last time: " + shown + " — hit " + def.rh + " reps on your best two sets to move up.",
+    pace]};
 }
+
+/* one renderer, so the logger and the history sheet can never disagree */
+function hintHTML(p){
+  return p.lines.map((t,i) =>
+    `<div class="hint-line hint-${i===0?"lead":i===1?"body":"pace"} ${i===2?esc(p.state):""}">${esc(t)}</div>`
+  ).join("");
+}
+
 function chipFor(exId){
   const p = progression(exId);
   return p.state === "ready" ? '<span class="chip ready">Add load</span>'
@@ -842,7 +916,7 @@ function viewToday(){
 }
 
 function loggerCard(e){
-  const def = exById[e.ex];
+  const def = defFor(e.ex);
   const p = progression(e.ex);
   const time = isTime(e.ex);
   const sets = e.sets.map((x,i) =>
@@ -889,7 +963,7 @@ function loggerCard(e){
         <div class="log-meta">${esc(muscleById[def.m].n)}${time ? "" : " · target " + def.rl + "–" + def.rh + " reps"}</div>
       </div>
       ${carriedOver() ? `<div class="lock-note">Started ${fmtDate(workingSession().date)} — still logging to that session.</div>` : ""}
-      <div class="target">${esc(p.msg)}${def.note ? " · " + esc(def.note) : ""}</div>
+      <div class="target">${hintHTML(p)}${def.note ? `<div class="hint-line hint-note">${esc(def.note)}</div>` : ""}</div>
       ${sets ? `<div class="setline">${sets}</div>` : ""}
       <div class="stepper">${controls}</div>
       <button class="btn btn-primary btn-wide" id="logBtn" data-logset="${e.ex}">
@@ -947,11 +1021,14 @@ function viewVolume(){
 /* ---------- LOG ---------- */
 function viewHistory(){
   if(ui.histEx){
-    const def = exById[ui.histEx];
+    const def = defFor(ui.histEx);
     return `
-      <button class="btn" data-hist="">← Back</button>
-      <div class="eyebrow">${esc(def.n)}</div>
-      <div class="card pad"><div class="note">${esc(progression(ui.histEx).msg)}</div></div>
+      <div class="btn-row">
+        <button class="btn" data-hist="">← Back</button>
+        <button class="btn" data-goals="${ui.histEx}">Edit goals</button>
+      </div>
+      <div class="eyebrow">${esc(def.n)}${goalsEdited(ui.histEx) ? " · custom" : ""}</div>
+      <div class="card pad"><div class="target">${hintHTML(progression(ui.histEx))}</div></div>
       <div class="card">
         ${exHistory(ui.histEx).map(x => `<div class="hist-item">
           <div class="hist-date">${fmtDate(x.date).toUpperCase()}</div>
@@ -1069,6 +1146,16 @@ function viewSetup(){
       <div style="padding:12px 12px 14px">
         <button class="btn btn-wide" data-tpladd="1">+ Add exercise to ${esc(dayById[day].n)}</button>
       </div>
+    </div>
+
+    <div class="eyebrow">Exercise goals</div>
+    <div class="card pad" style="display:flex;flex-direction:column;gap:10px">
+      <div class="note" style="font-size:13px;color:var(--muted);line-height:1.5">
+        Rep range and load step, per exercise. ${Object.keys(S.exGoals||{}).length
+          ? "<b>" + Object.keys(S.exGoals).length + "</b> changed from the defaults." : "All on defaults."}
+      </div>
+      <button class="btn btn-wide" id="openGoals" style="min-height:44px;font-size:14px">
+        Pick an exercise</button>
     </div>
 
     <div class="eyebrow">Weekly targets</div>
@@ -1237,7 +1324,7 @@ function openCatalogue(onPick, title){
       <div class="pick-row">
         <div style="min-width:0">
           <b>${esc(e.n)}</b>
-          <small>${e.kind==="time" ? "minutes" : e.rl + "–" + e.rh + " reps"} ${chipFor(e.id)}</small>
+          <small>${e.kind==="time" ? "minutes" : defFor(e.id).rl + "–" + defFor(e.id).rh + " reps"} ${chipFor(e.id)}</small>
         </div>
         <div class="pick-last">${(() => {
           const pv = exHistory(e.id).filter(h => h.date !== todayISO())[0];
@@ -1248,6 +1335,63 @@ function openCatalogue(onPick, title){
   sheet(title || "Pick an exercise", body);
   document.querySelectorAll("[data-cat]").forEach(b => b.onclick = () => {
     closeSheet(); onPick(b.dataset.cat);
+  });
+}
+
+/* per-exercise goals: rep range and the size of the load jump */
+function openGoalsSheet(exId){
+  const base = exById[exId], d = defFor(exId);
+  if(base.kind === "time"){
+    notice(base.n, "Cardio is logged in minutes — there's no rep range or load step to set.");
+    return;
+  }
+  const field = (key, label, val, step, hint) => `
+    <div class="goal-row">
+      <div class="goal-label">${esc(label)}<small>${esc(hint)}</small></div>
+      <input class="tgt-in" type="number" inputmode="decimal" min="0" step="${step}"
+        data-goal="${exId}:${key}" value="${val}" aria-label="${esc(label)}">
+    </div>`;
+
+  const body = `
+    ${field("rl", "Start at", d.rl, 1, "reps you aim for on a fresh load")}
+    ${field("rh", "Move up at", d.rh, 1, "hit this on your best two sets")}
+    ${field("inc", "Load step", d.inc, 0.5, base.u + " added when you move up")}
+    <div style="padding:14px 16px;display:flex;flex-direction:column;gap:9px">
+      <button class="btn btn-primary btn-wide" data-closesheet2="1">Done</button>
+      ${goalsEdited(exId) ? `<button class="btn btn-wide danger" data-goalreset="${exId}">Reset to ${base.rl}–${base.rh}, ${base.inc} ${base.u}</button>` : ""}
+    </div>`;
+
+  sheet("Goals", body, `<div class="queue-hero">
+      <div class="kicker">${esc(base.n)}</div>
+      <div class="line">Reps climb from the first number to the second at a fixed load. Hit the
+        second on your best two sets and the load goes up by the step.</div></div>`);
+
+  document.querySelector("[data-closesheet2]").onclick = () => { closeSheet(); render(); };
+  const rs = document.querySelector("[data-goalreset]");
+  if(rs) rs.onclick = () => { delete S.exGoals[exId]; save(); closeSheet(); render(); };
+
+  document.querySelectorAll("[data-goal]").forEach(el => {
+    const commit = () => {
+      const [id, key] = el.dataset.goal.split(":");
+      const b = exById[id];
+      const cur = Object.assign({}, S.exGoals[id] || {});
+      let v = num(el.value);
+      if(key === "inc"){ if(!(v > 0)) v = b.inc; }
+      else { v = Math.round(v); if(v < 1) v = 1; if(v > 100) v = 100; }
+      cur[key] = v;
+      /* keep the range the right way round */
+      const merged = Object.assign({rl:b.rl, rh:b.rh, inc:b.inc}, cur);
+      if(merged.rl > merged.rh){
+        if(key === "rl") merged.rh = merged.rl; else merged.rl = merged.rh;
+      }
+      S.exGoals[id] = merged;
+      el.value = merged[key];
+      const other = document.querySelector(`[data-goal="${id}:${key === "rl" ? "rh" : "rl"}"]`);
+      if(other && key !== "inc") other.value = merged[key === "rl" ? "rh" : "rl"];
+      save();
+    };
+    el.onchange = commit;
+    el.onblur = commit;
   });
 }
 
@@ -1340,7 +1484,7 @@ function wire(){
 
   q("[data-nudge]").forEach(b => b.onclick = () => {
     const [f, dir] = b.dataset.nudge.split(":");
-    const def = exById[ui.openEx];
+    const def = defFor(ui.openEx);
     const el = document.getElementById(f === "w" ? "inW" : f === "r" ? "inR" : "inT");
     const step = f === "w" ? def.inc : f === "t" ? (def.step || 5) : 1;
     let v = num(el.value) + (dir === "+" ? step : -step);
@@ -1492,6 +1636,11 @@ function wire(){
     clearTimeout(el._t);
     el._t = setTimeout(() => el.classList.remove("on"), 1400);
   };
+
+  q("[data-goals]").forEach(b => b.onclick = () => openGoalsSheet(b.dataset.goals));
+
+  const og = document.getElementById("openGoals");
+  if(og) og.onclick = () => openCatalogue(openGoalsSheet, "Set goals for");
 
   q("[data-tgt]").forEach(el => {
     const commit = () => {
