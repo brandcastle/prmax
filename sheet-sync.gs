@@ -1,36 +1,41 @@
 /**
  * PR Max — Google Sheet mirror
  *
- * Paste this into your Sheet: Extensions → Apps Script, replace everything,
- * save, then Deploy → New deployment → Web app:
- *     Execute as:  Me
- *     Who has access:  Anyone
- * Copy the /exec URL it gives you into PR Max → Setup → Google Sheet.
+ * HOW TO USE
+ *   1. Open your Google Sheet, then Extensions -> Apps Script.
+ *      (It must be opened from the Sheet, not from script.google.com.)
+ *   2. Select everything in the editor, delete it, paste this whole file.
+ *   3. Change SECRET on the line below to your own random string.
+ *   4. Save (Ctrl+S).
+ *   5. Deploy -> New deployment -> Web app
+ *          Execute as:      Me
+ *          Who has access:  Anyone
+ *      Deploy, approve the permissions, copy the /exec URL.
+ *   6. In PR Max: Setup -> Google Sheet. Paste the URL and the same SECRET.
  *
  * "Anyone" is required because the app sends a plain request with no Google
  * login. What protects your data instead:
- *   1. There is no doGet and no function that returns rows. The URL cannot be
- *      used to read your training log, only to write.
- *   2. Every request must carry the shared secret. Without it, nothing happens.
- *   3. The Sheet itself stays private to your Google account.
+ *   - There is no doGet and no function that returns rows, so the URL cannot
+ *     be used to read your training log. It can only write.
+ *   - Every request must carry SECRET.
+ *   - The Sheet stays private to your Google account.
  *
- * SETUP: edit setSecret() below to your own long random string, run it once from
- * the editor (Run -> setSecret), then blank the string back out and save. The
- * secret lives in Script Properties, not in this file, so sharing this project
- * never hands it over. Put the same string into PR Max -> Setup -> Google Sheet.
- *
- * NEVER set the Sheet itself to "anyone with the link can view". Nothing in this
- * script can protect you from that.
+ * NEVER set the Sheet itself to "anyone with the link can view".
+ * Nothing in this script can protect you from that.
  */
 
-/* The secret lives in Script Properties, not in this file, so sharing the
-   project does not hand it over. Run setSecret() once from the editor. */
+// ====== CHANGE THIS ONE LINE ======
+var SECRET = 'put-your-own-long-random-string-here';
+// ==================================
+
+/* Optional, only if you ever share this project with someone: run setSecret()
+   once from the editor, then blank out SECRET above. A value stored in Script
+   Properties wins over the line above. */
 function setSecret() {
-  PropertiesService.getScriptProperties()
-    .setProperty('SECRET', 'change-me-to-something-long');   // edit, run once, then blank it out
+  PropertiesService.getScriptProperties().setProperty('SECRET', SECRET);
 }
 function getSecret() {
-  return PropertiesService.getScriptProperties().getProperty('SECRET');
+  return PropertiesService.getScriptProperties().getProperty('SECRET') || SECRET;
 }
 
 var HEADERS = ["date", "day", "exercise", "muscle", "equipment",
@@ -40,7 +45,9 @@ function doPost(e) {
   try {
     var body = JSON.parse(e.postData.contents);
     var secret = getSecret();
-    if (!secret) return reply({ok: false, error: "server not configured"});
+    if (!secret || secret === 'put-your-own-long-random-string-here') {
+      return reply({ok: false, error: "set SECRET in the script first"});
+    }
     if (body.token !== secret) return reply({ok: false, error: "bad token"});
 
     var sheet = getSheet();
@@ -71,7 +78,7 @@ function doPost(e) {
 }
 
 /** A leading = + - @ makes Sheets treat a cell as a formula, and exercise names
- *  are user-typed. Prefix those with an apostrophe so they stay plain text. */
+ *  are typed by hand. Prefix those so they stay plain text. */
 function safeRow(row) {
   return row.map(function (v) {
     if (typeof v !== "string") return v;
@@ -100,6 +107,10 @@ function sortByDate(sheet) {
 
 function getSheet() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
+  if (!ss) {
+    throw new Error("This script is not attached to a Sheet. Open your Google " +
+                    "Sheet and use Extensions > Apps Script, then paste it there.");
+  }
   var sheet = ss.getSheetByName("Log") || ss.insertSheet("Log");
   if (sheet.getLastRow() === 0) {
     sheet.appendRow(HEADERS);
