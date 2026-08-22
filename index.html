@@ -455,7 +455,7 @@ textarea{width:100%;min-height:150px;font-family:var(--f-mono);font-size:12px;
    ====================================================================== */
 
 const KEY = "ironledger.v1";
-const BUILD = "2026.08.20.3";   /* keep in step with version.txt */
+const BUILD = "2026.08.22.8";   /* keep in step with version.txt */
 
 /* ---------------- exercise library ---------------- */
 const EX = [
@@ -862,15 +862,34 @@ function exHistory(exId){
 function loadPhrase(exId, v){
   if(v === 0) return "bodyweight";
   const u = (exById[exId] && exById[exId].u) || "lb";
-  return w(v) + " " + u;
+  return w(v) + "\u00a0" + u;   /* nbsp: never orphan the unit on its own line */
 }
 const repList = arr =>
   arr.length === 1 ? arr[0] + " reps"
   : arr.slice(0,-1).join(", ") + " and " + arr[arr.length-1] + " reps";
 
+/* the two sets that count at a load: your best two. One set is not a scoreable
+   session — a short day should never be able to look like a plateau. */
+function scoreAt(sess, load){
+  const at = sess.sets.filter(x => x.w === load);
+  if(at.length < 2) return null;
+  const best2 = [...at].sort((a,b) => b.r - a.r).slice(0,2);
+  return {
+    total: best2[0].r + best2[1].r,
+    min:   best2[1].r,
+    reps:  best2.map(x => x.r),          /* high, low — for the copy */
+    order: at.slice(0,2).map(x => x.r),  /* as performed — set 1, set 2 */
+  };
+}
+/* total first, then the weaker set: 10/8 beats 11/7 */
+const beatsScore = (a,b) => !b || a.total > b.total || (a.total === b.total && a.min > b.min);
+
 function progression(exId){
   const def = defFor(exId), h = exHistory(exId);
-  const past = h.filter(s => s.date !== todayISO());
+  /* a session carried past midnight is dated yesterday but is still being logged
+     into — scoring it as finished history would change the advice mid-workout */
+  const ws = workingSession();
+  const past = h.filter(s => s.date !== todayISO() && !(ws && s.date === ws.date));
 
   if(isTime(exId)){
     return past.length
@@ -884,9 +903,6 @@ function progression(exId){
   }
 
   const last = past[0], load = last.sets[0].w;
-  const atLoad = [];
-  for(const s of past){ if(s.sets[0].w === load) atLoad.push(s); else break; }
-
   /* your best two sets at the working load — BOTH must reach the top of the range */
   const atLoad2 = last.sets.filter(x => x.w === load);
   const working = [...atLoad2].sort((a,b) => b.r - a.r).slice(0,2);
@@ -901,15 +917,26 @@ function progression(exId){
       "Reps reset. Work back up to " + def.rh + "."]};
   }
 
-  if(atLoad.length >= 3){
-    const tops = atLoad.map(s => Math.max(...s.sets.map(x => x.r)));
-    if(tops[0] <= tops[tops.length-1]){
-      return {state:"stall", load, lines:[
-        "Stalled at " + loadPhrase(exId, load) + ".",
-        atLoad.length + " sessions here; your best set went " +
-          tops[tops.length-1] + " → " + tops[0] + " reps.",
-        "Swap the exercise, or drop about 10% and rebuild."]};
-    }
+  const scored = past.map(s => scoreAt(s, load)).filter(Boolean);   /* newest first */
+
+  /* anchor on the FIRST session that hit the best, so 18 → 18 → 18 → 18 reads as
+     three sessions without progress instead of resetting on every tie */
+  let best = null, bestIdx = -1;
+  for(let i = scored.length - 1; i >= 0; i--){
+    if(beatsScore(scored[i], best)){ best = scored[i]; bestIdx = i; }
+  }
+  const since = bestIdx > 0 ? bestIdx : 0;
+
+  /* set 2 catching up to set 1 is progress, even without a new best */
+  const climbing = scored.length >= 2
+    && scored[0].order[1] < scored[0].order[0]
+    && scored[0].order[1] > scored[1].order[1];
+
+  if(since >= 3 && !climbing){
+    return {state:"stall", load, lines:[
+      "No new best in " + since + " sessions at " + loadPhrase(exId, load) + ".",
+      "Best total: " + best.total + " reps (" + best.reps[0] + " + " + best.reps[1] + ").",
+      "Swap the exercise, or drop about 10% and rebuild."]};
   }
 
   let pace;
@@ -917,6 +944,12 @@ function progression(exId){
     pace = "Log 2 sets at " + def.rh + " reps to move up.";
   } else if(hits === 1){
     pace = "One more set at " + def.rh + " reps and the load goes up.";
+  } else if(since === 0 && scored.length >= 2){
+    pace = "New best last time — " + best.total + " total. Beat it again.";
+  } else if(climbing){
+    pace = "Set 2 is still climbing — that's the progress.";
+  } else if(best){
+    pace = "Beat " + best.total + " to progress. " + def.rh + " on both sets moves the load.";
   } else {
     const gap = def.rh - Math.max(...working.map(x => x.r));
     pace = gap + (gap === 1 ? " rep" : " reps") + " to go on your best set.";
@@ -924,7 +957,9 @@ function progression(exId){
 
   return {state:"hold", load, lines:[
     "Keep " + loadPhrase(exId, load) + " this session.",
-    "Last time: " + shown + " — hit " + def.rh + " reps on your best two sets to move up.",
+    "Last time: " + shown + (best
+      ? " — best here is " + best.total + " total (" + best.reps[0] + " + " + best.reps[1] + ")."
+      : " — hit " + def.rh + " reps on your best two sets to move up."),
     pace]};
 }
 
@@ -958,32 +993,127 @@ function weekVolume(){
 }
 
 /* ---------------- rest timer ---------------- */
-let restT = null, restLeft = 0;
+/* A plain setInterval countdown has two problems on a phone: it stops running the
+   moment the screen locks, and nothing fires at zero. So the clock is a timestamp,
+   which cannot be frozen or drift, and the alert is scheduled ahead on the Web
+   Audio clock, which keeps running when JS does not.
+   Sound is the only alert available here: iOS Safari has no Vibration API at all,
+   so navigator.vibrate is a no-op on an iPhone. */
+let restT = null, restEnd = 0;
+
+/* The turn-by-turn navigation category: pauses other audio, plays, and the other
+   audio resumes on its own - no manual restart. Chosen over "transient" because a
+   phone on silent is the normal case, and the mute switch silences the mixing
+   categories. Undocumented territory: MDN and the W3C spec both say nothing about
+   how these map to the iOS mute switch, so this is settled empirically.
+   If it misbehaves, this one constant is the whole fix:
+     "transient"      plays over music and ducks it, but likely mute-switched
+     "playback"       media-app category, ignores mute, takes over audio entirely
+     "ambient"        pure mix, least invasive, most likely to be silenced */
+const REST_SESSION_TYPE = "transient-solo";
+
+let actx = null, restChime = null, keepAlive = null;
+
+/* Must run inside a real tap - iOS refuses to start audio otherwise. */
+function unlockAudio(){
+  try{
+    if(!actx){
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if(!AC) return null;
+      actx = new AC();
+    }
+    if(actx.state === "suspended") actx.resume();
+    if(navigator.audioSession) navigator.audioSession.type = REST_SESSION_TYPE;
+    if(!keepAlive){
+      /* a near-silent loop holds the audio session open; without it iOS suspends
+         the context in the background and the scheduled chime never sounds */
+      const buf = actx.createBuffer(1, actx.sampleRate, actx.sampleRate);
+      const g = actx.createGain();
+      g.gain.value = 0.0001;
+      keepAlive = actx.createBufferSource();
+      keepAlive.buffer = buf;
+      keepAlive.loop = true;
+      keepAlive.connect(g); g.connect(actx.destination);
+      keepAlive.start();
+    }
+    return actx;
+  }catch(e){ return null; }
+}
+
+function cancelChime(){
+  if(!restChime) return;
+  restChime.forEach(o => { try{ o.stop(actx ? actx.currentTime : 0); }catch(e){} });
+  restChime = null;
+}
+
+/* Two short tones pinned to an absolute point on the audio clock. Oscillators
+   rather than a sound file: this is one HTML file with no build step, and the
+   preview artifact's CSP blocks external assets. */
+function scheduleChime(inSeconds){
+  cancelChime();
+  if(!actx) return;
+  const t0 = actx.currentTime + Math.max(inSeconds, 0);
+  restChime = [880, 1175].map((hz, i) => {
+    const t = t0 + i * 0.16;
+    const osc = actx.createOscillator(), g = actx.createGain();
+    osc.type = "sine";
+    osc.frequency.value = hz;
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.5, t + 0.012);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.14);
+    osc.connect(g); g.connect(actx.destination);
+    osc.start(t); osc.stop(t + 0.16);
+    return osc;
+  });
+}
+
+const restLeft = () => Math.max(0, Math.ceil((restEnd - Date.now()) / 1000));
+
 function startRest(){
-  restLeft = S.restLen;
+  unlockAudio();                        /* runs straight off the Log set tap */
+  restEnd = Date.now() + S.restLen * 1000;
   document.getElementById("rest").classList.remove("hidden","done");
+  scheduleChime(S.restLen);
   paintRest();
   clearInterval(restT);
-  restT = setInterval(() => {
-    restLeft--;
-    if(restLeft <= 0){
-      restLeft = 0;
-      document.getElementById("rest").classList.add("done");
-      clearInterval(restT);
-      if(navigator.vibrate) navigator.vibrate([120,80,120]);
-    }
-    paintRest();
-  }, 1000);
+  restT = setInterval(paintRest, 250);  /* repaint only - restEnd is the clock */
 }
+
 function paintRest(){
-  const m = Math.floor(restLeft/60), s = restLeft % 60;
-  document.getElementById("restTime").textContent =
-    restLeft <= 0 ? "GO" : m + ":" + String(s).padStart(2,"0");
+  const el = document.getElementById("restTime");
+  if(!el) return;
+  const left = restLeft();
+  const m = Math.floor(left/60), s = left % 60;
+  el.textContent = left <= 0 ? "GO" : m + ":" + String(s).padStart(2,"0");
+  if(left <= 0){
+    document.getElementById("rest").classList.add("done");
+    clearInterval(restT); restT = null;
+    /* no-op on iOS, but correct on Android */
+    if(navigator.vibrate) navigator.vibrate([120,80,120]);
+  }
 }
-function stopRest(){ clearInterval(restT); document.getElementById("rest").classList.add("hidden"); }
+
+/* Coming back from a locked screen: the interval was throttled or killed, so
+   repaint from the timestamp and pick the ticking back up. */
+function resumeRest(){
+  const host = document.getElementById("rest");
+  if(!host || host.classList.contains("hidden")) return;
+  paintRest();
+  if(restLeft() > 0 && !restT) restT = setInterval(paintRest, 250);
+}
+
+function stopRest(){
+  clearInterval(restT); restT = null;
+  cancelChime();
+  document.getElementById("rest").classList.add("hidden");
+}
 document.getElementById("restStop").onclick = stopRest;
 document.getElementById("restAdd").onclick = () => {
-  restLeft += 30; document.getElementById("rest").classList.remove("done"); paintRest();
+  restEnd = Math.max(restEnd, Date.now()) + 30000;
+  document.getElementById("rest").classList.remove("done");
+  scheduleChime((restEnd - Date.now()) / 1000);
+  if(!restT) restT = setInterval(paintRest, 250);
+  paintRest();
 };
 
 /* ---------------- theme ---------------- */
@@ -1149,7 +1279,7 @@ function loggerCard(e){
         ${time ? "Log it · finish" : "Log set · start rest"}</button>
       <button class="btn btn-wide" data-next="${e.ex}">Next exercise</button>
       <div class="btn-row">
-        <button class="btn" data-hist="${e.ex}">History</button>
+        <button class="btn" data-histsheet="${e.ex}">History</button>
         <button class="btn" data-rmex="${e.ex}">Remove</button>
       </div>
     </div>`;
@@ -1198,6 +1328,20 @@ function viewVolume(){
 }
 
 /* ---------- LOG ---------- */
+/* One renderer for a single exercise's history, so the Log tab and the
+   in-session sheet can never drift apart. */
+function exHistoryBody(exId){
+  return `
+      <div class="card pad"><div class="target">${hintHTML(progression(exId))}</div></div>
+      <div class="card">
+        ${exHistory(exId).map(x => `<div class="hist-item">
+          <div class="hist-date">${fmtDate(x.date).toUpperCase()}</div>
+          <div class="setline" style="margin-top:6px">
+            ${x.sets.map(y => `<span class="setpill">${setLabel(exId, y)}</span>`).join("")}
+          </div></div>`).join("") || '<div class="pad note">No sessions yet.</div>'}
+      </div>`;
+}
+
 function viewHistory(){
   if(ui.histEx){
     const def = defFor(ui.histEx);
@@ -1207,14 +1351,7 @@ function viewHistory(){
         <button class="btn" data-goals="${ui.histEx}">Edit goals</button>
       </div>
       <div class="eyebrow">${esc(def.n)}${goalsEdited(ui.histEx) ? " · custom" : ""}</div>
-      <div class="card pad"><div class="target">${hintHTML(progression(ui.histEx))}</div></div>
-      <div class="card">
-        ${exHistory(ui.histEx).map(x => `<div class="hist-item">
-          <div class="hist-date">${fmtDate(x.date).toUpperCase()}</div>
-          <div class="setline" style="margin-top:6px">
-            ${x.sets.map(y => `<span class="setpill">${setLabel(ui.histEx, y)}</span>`).join("")}
-          </div></div>`).join("") || '<div class="pad note">No sessions yet.</div>'}
-      </div>`;
+      ${exHistoryBody(ui.histEx)}`;
   }
   return `
     <div class="seg two">
@@ -1333,7 +1470,7 @@ function viewSetup(){
         <div class="tpl-row">
           <div class="tpl-name">${esc(c.n)}${c.archived ? " <small style='display:inline;color:var(--stall)'>archived</small>" : ""}
             <small>${esc(muscleName(c.m))}${c.equip ? " · " + esc(c.equip) : ""}</small></div>
-          <button class="tpl-btn" data-cxgoals="${c.id}" aria-label="goals">⚙</button>
+          <button class="tpl-btn" data-cxgoals="${c.id}" aria-label="edit">⚙</button>
           <button class="tpl-btn ${c.archived ? "" : "x"}" data-cxdel="${c.id}"
             aria-label="${c.archived ? "restore" : "remove"}">${c.archived ? "↩" : "✕"}</button>
         </div>`).join("")
@@ -1512,6 +1649,21 @@ function sheet(title, body, hero, opts){
 }
 function closeSheet(){ document.getElementById("sheetHost").innerHTML = ""; }
 
+/* History without leaving the workout. A sheet overlays the current view, so
+   the logger underneath keeps its scroll position and its open exercise. */
+function openHistorySheet(exId){
+  const def = defFor(exId);
+  const body = `<div class="wrap">
+      ${exHistoryBody(exId)}
+      <button class="btn btn-wide" data-histgoals="${exId}">Edit goals</button>
+    </div>`;
+  sheet(def.n, body, `<div class="queue-hero">
+      <div class="kicker">${esc(muscleById[def.m].n)}${goalsEdited(exId) ? " · custom" : ""}</div>
+      <div class="line">${isTime(exId) ? "Logged in minutes."
+        : "Target " + def.rl + "–" + def.rh + " reps."}</div></div>`);
+  document.querySelector("[data-histgoals]").onclick = () => openGoalsSheet(exId);
+}
+
 /* Sandboxed frames (the hosted version) silently refuse window.confirm/alert,
    so every confirmation runs through our own sheet instead. */
 function askConfirm(o){
@@ -1617,7 +1769,29 @@ function openMusclePicker(onPick, onBack, opts){
 let newEx = null;
 
 function openCreateSheet(onDone){
-  newEx = {name:"", m:"", equip:"", sec:[], kind:"weight", rl:8, rh:12, inc:5, picked:false};
+  newEx = {name:"", m:"", equip:"", sec:[], kind:"weight", rl:8, rh:12, inc:5, picked:false,
+           editId:null, logged:0};
+  renderCreate(onDone);
+}
+
+/* The same sheet, pointed at one you already made. The id is generated once at
+   creation and never changes, and logs key off the id, so a rename cannot
+   orphan history. */
+function openEditSheet(id, onDone){
+  const rec = (S.customEx || []).find(x => x.id === id);
+  if(!rec) return;
+  const d = defFor(id);
+  newEx = {
+    editId: id,
+    name: rec.n,
+    m: rec.m,
+    equip: rec.equip || "",
+    sec: (rec.sec || []).slice(),
+    kind: rec.kind === "time" ? "time" : (rec.bw ? "bw" : "weight"),
+    rl: d.rl || 8, rh: d.rh || 12, inc: d.inc || 5,
+    picked: true,                    /* an existing name should not re-open the search */
+    logged: exHistory(id).length,    /* locks the Type row below */
+  };
   renderCreate(onDone);
 }
 
@@ -1648,11 +1822,13 @@ function createBody(){
     </div>
 
     <div class="goal-row" style="grid-template-columns:1fr">
-      <div class="goal-label">Type<small>what you log for it</small></div>
+      <div class="goal-label">Type<small>${n.logged
+        ? "locked — logged on " + n.logged + " session" + (n.logged===1?"":"s")
+        : "what you log for it"}</small></div>
       <div class="seg">
-        <button data-kind="weight" class="${n.kind==="weight"?"on":""}">Weighted</button>
-        <button data-kind="bw" class="${n.kind==="bw"?"on":""}">Bodyweight</button>
-        <button data-kind="time" class="${n.kind==="time"?"on":""}">Time</button>
+        <button data-kind="weight" ${n.logged?"disabled":""} class="${n.kind==="weight"?"on":""}">Weighted</button>
+        <button data-kind="bw" ${n.logged?"disabled":""} class="${n.kind==="bw"?"on":""}">Bodyweight</button>
+        <button data-kind="time" ${n.logged?"disabled":""} class="${n.kind==="time"?"on":""}">Time</button>
       </div>
     </div>
 
@@ -1681,7 +1857,7 @@ function createBody(){
     </div>
 
     <div style="padding:14px 16px;display:flex;flex-direction:column;gap:9px">
-      <button class="btn btn-primary btn-wide" id="cxSave">Create exercise</button>
+      <button class="btn btn-primary btn-wide" id="cxSave">${n.editId ? "Save changes" : "Create exercise"}</button>
       <button class="btn btn-wide" data-closesheet3="1">Cancel</button>
     </div>`;
 }
@@ -1695,7 +1871,7 @@ function syncMuscleGate(onDone){
   const named = !!(newEx.name || "").trim();
   /* clearing the name discards anything a prefill filled in — otherwise the old
      muscle and secondary list stick to a completely different exercise */
-  if(!named && (newEx.m || newEx.sec.length || newEx.equip)){
+  if(!named && !newEx.editId && (newEx.m || newEx.sec.length || newEx.equip)){
     newEx.m = ""; newEx.sec = []; newEx.equip = "";
     renderCreate(onDone);
     const el = document.getElementById("cxName");
@@ -1725,10 +1901,13 @@ function searchDB(q){
 }
 
 function renderCreate(onDone){
-  sheet("New exercise", createBody(), `<div class="queue-hero">
-    <div class="kicker">Custom exercise</div>
-    <div class="line">Search the reference list to fill this in, or just type your own name
-      and set it up yourself.</div></div>`);
+  const editing = !!newEx.editId;
+  sheet(editing ? "Edit exercise" : "New exercise", createBody(), `<div class="queue-hero">
+    <div class="kicker">${editing ? "Your exercise" : "Custom exercise"}</div>
+    <div class="line">${editing
+      ? "Renaming is safe — every session you have already logged stays attached to it."
+      : `Search the reference list to fill this in, or just type your own name
+      and set it up yourself.`}</div></div>`);
   wireCreate(onDone);
 }
 
@@ -1789,8 +1968,8 @@ function wireCreate(onDone){
     const name = (newEx.name || "").trim();
     if(!name){ notice("Needs a name", "Give the exercise a name before saving."); return; }
     if(!newEx.m){ notice("Needs a muscle", "Pick which muscle this counts toward on the Volume page."); return; }
-    const clash = EX.find(e => e.n.toLowerCase() === name.toLowerCase());
-    const go = () => saveCustom(name, onDone);
+    const clash = EX.find(e => e.n.toLowerCase() === name.toLowerCase() && e.id !== newEx.editId);
+    const go = () => newEx.editId ? updateCustom(name, onDone) : saveCustom(name, onDone);
     if(clash){
       askConfirm({
         title:"Name already used",
@@ -1823,6 +2002,35 @@ function saveCustom(name, onDone){
   }
   S.customEx.push(rec);
   EX.push(rec); exById[id] = rec;
+  save(); closeSheet();
+  if(onDone) onDone(id); else render();
+}
+
+/* Write the edits back onto the record. exById holds the same object, so the
+   catalogue, the day templates and every logged session follow automatically. */
+function updateCustom(name, onDone){
+  const id = newEx.editId;
+  const rec = (S.customEx || []).find(x => x.id === id);
+  if(!rec) return;
+  rec.n = name;
+  rec.m = newEx.m;
+  rec.sec = newEx.sec;
+  rec.equip = newEx.equip;
+  delete rec.kind; delete rec.step; delete rec.bw;   /* Type is locked once logged */
+  if(newEx.kind === "time"){ rec.kind = "time"; rec.step = 5; }
+  else {
+    rec.rl = Math.min(newEx.rl, newEx.rh);
+    rec.rh = Math.max(newEx.rl, newEx.rh);
+    rec.inc = newEx.inc;
+    if(newEx.kind === "bw") rec.bw = true;
+  }
+  const live = exById[id];
+  if(live && live !== rec){
+    Object.keys(live).forEach(k => delete live[k]);
+    Object.assign(live, rec);
+  }
+  /* a saved override would shadow the numbers just typed in */
+  if(S.exGoals) delete S.exGoals[id];
   save(); closeSheet();
   if(onDone) onDone(id); else render();
 }
@@ -2054,6 +2262,7 @@ function wire(){
   q("[data-hist]").forEach(b => b.onclick = () => {
     ui.histEx = b.dataset.hist || null; ui.tab = "history"; render();
   });
+  q("[data-histsheet]").forEach(b => b.onclick = () => openHistorySheet(b.dataset.histsheet));
   q("[data-discard]").forEach(b => b.onclick = () => {
     const cur = workingSession();
     if(!cur) return;
@@ -2127,7 +2336,7 @@ function wire(){
   };
 
   q("[data-goals]").forEach(b => b.onclick = () => openGoalsSheet(b.dataset.goals));
-  q("[data-cxgoals]").forEach(b => b.onclick = () => openGoalsSheet(b.dataset.cxgoals));
+  q("[data-cxgoals]").forEach(b => b.onclick = () => openEditSheet(b.dataset.cxgoals, () => render()));
 
   const nx = document.getElementById("newExBtn");
   if(nx) nx.onclick = () => openCreateSheet(() => render());
@@ -2392,7 +2601,7 @@ checkBuild();
 flushSync(false);
 document.addEventListener("visibilitychange", () => {
   if(document.hidden && ui.showSecrets){ ui.showSecrets = false; render(); }
-  if(!document.hidden){ checkBuild(); flushSync(false); }
+  if(!document.hidden){ checkBuild(); flushSync(false); resumeRest(); }
 });
 window.addEventListener("online", () => flushSync(false));
 
