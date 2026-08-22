@@ -4,7 +4,11 @@
 <title>PR Max</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<!-- media=print makes this non-blocking, then it is switched on once it lands.
+     Blocking on Google over gym signal was costing seconds of blank screen on
+     every cold start; every stack below falls back to a real system font. -->
+<link rel="stylesheet" media="print" onload="this.media='all'" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap"></noscript>
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="theme-color" content="#F7F8F4">
@@ -455,7 +459,7 @@ textarea{width:100%;min-height:150px;font-family:var(--f-mono);font-size:12px;
    ====================================================================== */
 
 const KEY = "ironledger.v1";
-const BUILD = "2026.08.22.8";   /* keep in step with version.txt */
+const BUILD = "2026.08.22.9";   /* keep in step with version.txt */
 
 /* ---------------- exercise library ---------------- */
 const EX = [
@@ -999,22 +1003,22 @@ function weekVolume(){
    Audio clock, which keeps running when JS does not.
    Sound is the only alert available here: iOS Safari has no Vibration API at all,
    so navigator.vibrate is a no-op on an iPhone. */
-let restT = null, restEnd = 0;
+let restT = null, restEnd = 0, restChimed = false;
 
-/* The turn-by-turn navigation category: pauses other audio, plays, and the other
-   audio resumes on its own - no manual restart. Chosen over "transient" because a
-   phone on silent is the normal case, and the mute switch silences the mixing
-   categories. Undocumented territory: MDN and the W3C spec both say nothing about
-   how these map to the iOS mute switch, so this is settled empirically.
-   If it misbehaves, this one constant is the whole fix:
-     "transient"      plays over music and ducks it, but likely mute-switched
-     "playback"       media-app category, ignores mute, takes over audio entirely
-     "ambient"        pure mix, least invasive, most likely to be silenced */
-const REST_SESSION_TYPE = "transient-solo";
+/* Tested on the phone, and this is the honest result: the chime cannot be made to
+   fire while the screen is locked. Surviving the background needs an audio session
+   held open across the whole rest, and iOS reads that as "this page is playing
+   media" - it stopped his music the instant a rest began, and the note scheduled
+   ahead still never sounded. So the alert is foreground-only and nothing is held.
+   "playback" is claimed for a fraction of a second around the chime because it is
+   the one category that plays through the mute switch, and his ringer is always on
+   silent. Audio is handed straight back afterwards. */
+const REST_ALERT_TYPE = "playback";
 
-let actx = null, restChime = null, keepAlive = null;
+let actx = null;
 
-/* Must run inside a real tap - iOS refuses to start audio otherwise. */
+/* Must run inside a real tap - iOS refuses to start audio otherwise. This only
+   opens an idle context; the session is claimed later, at the chime. */
 function unlockAudio(){
   try{
     if(!actx){
@@ -1023,48 +1027,32 @@ function unlockAudio(){
       actx = new AC();
     }
     if(actx.state === "suspended") actx.resume();
-    if(navigator.audioSession) navigator.audioSession.type = REST_SESSION_TYPE;
-    if(!keepAlive){
-      /* a near-silent loop holds the audio session open; without it iOS suspends
-         the context in the background and the scheduled chime never sounds */
-      const buf = actx.createBuffer(1, actx.sampleRate, actx.sampleRate);
-      const g = actx.createGain();
-      g.gain.value = 0.0001;
-      keepAlive = actx.createBufferSource();
-      keepAlive.buffer = buf;
-      keepAlive.loop = true;
-      keepAlive.connect(g); g.connect(actx.destination);
-      keepAlive.start();
-    }
     return actx;
   }catch(e){ return null; }
 }
 
-function cancelChime(){
-  if(!restChime) return;
-  restChime.forEach(o => { try{ o.stop(actx ? actx.currentTime : 0); }catch(e){} });
-  restChime = null;
-}
-
-/* Two short tones pinned to an absolute point on the audio clock. Oscillators
-   rather than a sound file: this is one HTML file with no build step, and the
-   preview artifact's CSP blocks external assets. */
-function scheduleChime(inSeconds){
-  cancelChime();
-  if(!actx) return;
-  const t0 = actx.currentTime + Math.max(inSeconds, 0);
-  restChime = [880, 1175].map((hz, i) => {
-    const t = t0 + i * 0.16;
-    const osc = actx.createOscillator(), g = actx.createGain();
-    osc.type = "sine";
-    osc.frequency.value = hz;
-    g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(0.5, t + 0.012);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.14);
-    osc.connect(g); g.connect(actx.destination);
-    osc.start(t); osc.stop(t + 0.16);
-    return osc;
-  });
+/* Two short tones, now. Returns false when the browser refuses to play. */
+function chimeNow(){
+  if(!actx || actx.state !== "running") return false;
+  try{
+    if(navigator.audioSession) navigator.audioSession.type = REST_ALERT_TYPE;
+    const t0 = actx.currentTime + 0.02;
+    [880, 1175].forEach((hz, i) => {
+      const t = t0 + i * 0.16;
+      const osc = actx.createOscillator(), g = actx.createGain();
+      osc.type = "sine";
+      osc.frequency.value = hz;
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.5, t + 0.012);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.14);
+      osc.connect(g); g.connect(actx.destination);
+      osc.start(t); osc.stop(t + 0.16);
+    });
+    setTimeout(() => {                       /* give the music straight back */
+      try{ if(navigator.audioSession) navigator.audioSession.type = "ambient"; }catch(e){}
+    }, 700);
+    return true;
+  }catch(e){ return false; }
 }
 
 const restLeft = () => Math.max(0, Math.ceil((restEnd - Date.now()) / 1000));
@@ -1072,8 +1060,8 @@ const restLeft = () => Math.max(0, Math.ceil((restEnd - Date.now()) / 1000));
 function startRest(){
   unlockAudio();                        /* runs straight off the Log set tap */
   restEnd = Date.now() + S.restLen * 1000;
+  restChimed = false;
   document.getElementById("rest").classList.remove("hidden","done");
-  scheduleChime(S.restLen);
   paintRest();
   clearInterval(restT);
   restT = setInterval(paintRest, 250);  /* repaint only - restEnd is the clock */
@@ -1088,8 +1076,14 @@ function paintRest(){
   if(left <= 0){
     document.getElementById("rest").classList.add("done");
     clearInterval(restT); restT = null;
-    /* no-op on iOS, but correct on Android */
-    if(navigator.vibrate) navigator.vibrate([120,80,120]);
+    if(!restChimed){
+      restChimed = true;
+      /* don't sound off for a rest that quietly ended several minutes ago */
+      if(Date.now() - restEnd < 5000){
+        chimeNow();
+        if(navigator.vibrate) navigator.vibrate([120,80,120]);   /* no-op on iOS */
+      }
+    }
   }
 }
 
@@ -1104,14 +1098,13 @@ function resumeRest(){
 
 function stopRest(){
   clearInterval(restT); restT = null;
-  cancelChime();
   document.getElementById("rest").classList.add("hidden");
 }
 document.getElementById("restStop").onclick = stopRest;
 document.getElementById("restAdd").onclick = () => {
   restEnd = Math.max(restEnd, Date.now()) + 30000;
+  restChimed = false;
   document.getElementById("rest").classList.remove("done");
-  scheduleChime((restEnd - Date.now()) / 1000);
   if(!restT) restT = setInterval(paintRest, 250);
   paintRest();
 };
