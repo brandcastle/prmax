@@ -459,7 +459,7 @@ textarea{width:100%;min-height:150px;font-family:var(--f-mono);font-size:12px;
    ====================================================================== */
 
 const KEY = "ironledger.v1";
-const BUILD = "2026.08.22.9";   /* keep in step with version.txt */
+const BUILD = "2026.08.23.10";   /* keep in step with version.txt */
 
 /* ---------------- exercise library ---------------- */
 const EX = [
@@ -1005,54 +1005,102 @@ function weekVolume(){
    so navigator.vibrate is a no-op on an iPhone. */
 let restT = null, restEnd = 0, restChimed = false;
 
-/* Tested on the phone, and this is the honest result: the chime cannot be made to
-   fire while the screen is locked. Surviving the background needs an audio session
-   held open across the whole rest, and iOS reads that as "this page is playing
-   media" - it stopped his music the instant a rest began, and the note scheduled
-   ahead still never sounded. So the alert is foreground-only and nothing is held.
-   "playback" is claimed for a fraction of a second around the chime because it is
-   the one category that plays through the mute switch, and his ringer is always on
-   silent. Audio is handed straight back afterwards. */
-const REST_ALERT_TYPE = "playback";
+/* Why an <audio> element and not Web Audio, which is what this used to be:
+   on his phone, ringer on gave a chime, ringer on silent gave nothing. iOS
+   silences Web Audio with the mute switch, but plays media elements through it -
+   which is why web video has sound on a silenced phone. Same two tones as before,
+   he liked them; only the delivery changed.
+   Nothing here touches navigator.audioSession. Claiming a session is what was
+   stopping his music, and it never beat the mute switch anyway. */
 
-let actx = null;
+let chimeEl = null;
 
-/* Must run inside a real tap - iOS refuses to start audio otherwise. This only
-   opens an idle context; the session is claimed later, at the chime. */
-function unlockAudio(){
-  try{
-    if(!actx){
-      const AC = window.AudioContext || window.webkitAudioContext;
-      if(!AC) return null;
-      actx = new AC();
+/* The chime, rendered once into a real WAV. Built in code rather than embedded as
+   base64 so the app stays one small self-contained file. */
+function buildChimeURL(){
+  const rate = 44100, n = Math.floor(rate * 0.36);
+  const buf = new Float32Array(n);
+  const tone = (startS, hz, lenS) => {
+    const s0 = Math.floor(startS * rate), len = Math.floor(lenS * rate);
+    for(let i = 0; i < len && s0 + i < n; i++){
+      const t = i / rate;
+      const env = Math.min(1, t / 0.008) * Math.exp(-t * 20);   /* quick attack, soft tail */
+      buf[s0 + i] += Math.sin(2 * Math.PI * hz * t) * env * 0.55;
     }
-    if(actx.state === "suspended") actx.resume();
-    return actx;
-  }catch(e){ return null; }
+  };
+  tone(0,    880,  0.17);
+  tone(0.16, 1175, 0.19);
+
+  const bytes = new ArrayBuffer(44 + n * 2);
+  const dv = new DataView(bytes);
+  const str = (off, v) => { for(let k = 0; k < v.length; k++) dv.setUint8(off + k, v.charCodeAt(k)); };
+  str(0, "RIFF");  dv.setUint32(4, 36 + n * 2, true);   str(8, "WAVE");
+  str(12, "fmt "); dv.setUint32(16, 16, true);          dv.setUint16(20, 1, true);
+  dv.setUint16(22, 1, true);                            dv.setUint32(24, rate, true);
+  dv.setUint32(28, rate * 2, true);                     dv.setUint16(32, 2, true);
+  dv.setUint16(34, 16, true);
+  str(36, "data"); dv.setUint32(40, n * 2, true);
+  for(let i = 0; i < n; i++){
+    const v = Math.max(-1, Math.min(1, buf[i]));
+    dv.setInt16(44 + i * 2, v * 32767, true);
+  }
+  return URL.createObjectURL(new Blob([bytes], {type:"audio/wav"}));
 }
 
-/* Two short tones, now. Returns false when the browser refuses to play. */
-function chimeNow(){
-  if(!actx || actx.state !== "running") return false;
+function chimeElement(){
+  if(!chimeEl){
+    chimeEl = new Audio(buildChimeURL());
+    chimeEl.preload = "auto";
+  }
+  return chimeEl;
+}
+
+/* Must run inside a real tap. iOS will not let a media element play later on a
+   timer unless it has been played once from a gesture, so prime it muted. */
+function unlockAudio(){
   try{
-    if(navigator.audioSession) navigator.audioSession.type = REST_ALERT_TYPE;
-    const t0 = actx.currentTime + 0.02;
-    [880, 1175].forEach((hz, i) => {
-      const t = t0 + i * 0.16;
-      const osc = actx.createOscillator(), g = actx.createGain();
-      osc.type = "sine";
-      osc.frequency.value = hz;
-      g.gain.setValueAtTime(0.0001, t);
-      g.gain.exponentialRampToValueAtTime(0.5, t + 0.012);
-      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.14);
-      osc.connect(g); g.connect(actx.destination);
-      osc.start(t); osc.stop(t + 0.16);
-    });
-    setTimeout(() => {                       /* give the music straight back */
-      try{ if(navigator.audioSession) navigator.audioSession.type = "ambient"; }catch(e){}
-    }, 700);
+    const el = chimeElement();
+    el.muted = true;
+    const p = el.play();
+    const done = () => { try{ el.pause(); el.currentTime = 0; el.muted = false; }catch(e){} };
+    if(p && p.then) p.then(done).catch(() => { el.muted = false; });
+    else done();
+  }catch(e){}
+}
+
+function chimeNow(){
+  try{
+    const el = chimeElement();
+    el.currentTime = 0;
+    const p = el.play();
+    if(p && p.catch) p.catch(() => {});
     return true;
   }catch(e){ return false; }
+}
+
+/* Temporary, until the phone tells us which mode works. Remove once settled. */
+function testSound(mode){
+  const out = document.getElementById("sndOut");
+  const has = !!navigator.audioSession;
+  const show = note => {
+    if(out) out.textContent =
+      "mode: " + mode + "  ->  " + note +
+      "\naudioSession: " + (has ? navigator.audioSession.type : "not supported") +
+      "\nclip readyState: " + (chimeEl ? chimeEl.readyState : "-");
+  };
+  try{
+    if(has && mode !== "none") navigator.audioSession.type = mode;
+    const el = chimeElement();
+    el.muted = false;
+    el.currentTime = 0;
+    const p = el.play();
+    if(p && p.then) p.then(() => show("play() resolved")).catch(e => show("blocked: " + e.name));
+    else show("play() returned nothing");
+  }catch(e){ show("error: " + e.message); }
+  if(has && mode !== "none"){
+    /* hand audio back so a test cannot leave his music stopped for good */
+    setTimeout(() => { try{ navigator.audioSession.type = "ambient"; }catch(e){} }, 2000);
+  }
 }
 
 const restLeft = () => Math.max(0, Math.ceil((restEnd - Date.now()) / 1000));
@@ -1532,6 +1580,19 @@ function viewSetup(){
         <button data-theme-set="system" class="${S.theme==="system"?"on":""}">Auto</button>
       </div>
       <div class="note" style="color:var(--muted);font-size:13px">Auto follows your iPhone's Display setting.</div>
+    </div>
+
+    <div class="eyebrow">Sound check</div>
+    <div class="card pad" style="display:flex;flex-direction:column;gap:9px">
+      <div class="note" style="font-size:13px;color:var(--muted);line-height:1.5">
+        Ringer on silent, music playing. Tap each one and tell me two things: did it make a
+        sound, and did it stop the music. Modes 2 and 3 hand audio back after 2 seconds.
+      </div>
+      <button class="btn btn-wide" data-snd="none">1 &middot; Clip</button>
+      <button class="btn btn-wide" data-snd="ambient">2 &middot; Clip, mixing mode</button>
+      <button class="btn btn-wide" data-snd="playback">3 &middot; Clip, playback mode</button>
+      <div class="note" id="sndOut" style="font-family:var(--f-mono);font-size:11.5px;
+        color:var(--faint);line-height:1.6;white-space:pre-line">Tap one to test.</div>
     </div>
 
     <div class="eyebrow">Rest timer</div>
@@ -2329,6 +2390,7 @@ function wire(){
   };
 
   q("[data-goals]").forEach(b => b.onclick = () => openGoalsSheet(b.dataset.goals));
+  q("[data-snd]").forEach(b => b.onclick = () => testSound(b.dataset.snd));
   q("[data-cxgoals]").forEach(b => b.onclick = () => openEditSheet(b.dataset.cxgoals, () => render()));
 
   const nx = document.getElementById("newExBtn");
