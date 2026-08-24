@@ -224,7 +224,12 @@ button{font:inherit;color:inherit;cursor:pointer}
   background:var(--surface);border:1px solid var(--line-strong);box-shadow:var(--shadow);
   border-radius:999px;padding:6px 7px 6px 16px;margin:0 12px}
 .rest-time{font-family:var(--f-mono);font-size:20px;font-weight:600;font-variant-numeric:tabular-nums}
-.rest.done .rest-time{color:var(--accent)}
+/* his ringer is normally off, so this is the alert, not a decoration */
+.rest.done .rest-inner{background:var(--accent-bright);border-color:var(--accent-bright);
+  animation:restpop 1s ease-in-out 3}
+.rest.done .rest-time{color:#0E1113}
+.rest.done .btn{background:rgba(0,0,0,.09);border-color:rgba(0,0,0,.22);color:#0E1113}
+@keyframes restpop{0%,100%{transform:scale(1)}50%{transform:scale(1.06)}}
 .rest-inner .btn{padding:7px 13px;font-size:13px;border-radius:999px;min-height:40px}
 
 /* ---------- volume ---------- */
@@ -459,7 +464,7 @@ textarea{width:100%;min-height:150px;font-family:var(--f-mono);font-size:12px;
    ====================================================================== */
 
 const KEY = "ironledger.v1";
-const BUILD = "2026.08.23.10";   /* keep in step with version.txt */
+const BUILD = "2026.08.23.11";   /* keep in step with version.txt */
 
 /* ---------------- exercise library ---------------- */
 const EX = [
@@ -1005,13 +1010,17 @@ function weekVolume(){
    so navigator.vibrate is a no-op on an iPhone. */
 let restT = null, restEnd = 0, restChimed = false;
 
-/* Why an <audio> element and not Web Audio, which is what this used to be:
-   on his phone, ringer on gave a chime, ringer on silent gave nothing. iOS
-   silences Web Audio with the mute switch, but plays media elements through it -
-   which is why web video has sound on a silenced phone. Same two tones as before,
-   he liked them; only the delivery changed.
-   Nothing here touches navigator.audioSession. Claiming a session is what was
-   stopping his music, and it never beat the mute switch anyway. */
+/* Settled on the device, so nobody has to guess at it again.
+   Three mechanisms were tried against the iOS mute switch and all three lost:
+   Web Audio tones, an <audio> element, and an <audio> element with the audio
+   session claimed as "playback". Ringer on, the clip plays over music without
+   interrupting it. Ringer off, nothing makes a sound, and claiming "playback"
+   merely kills the music without producing a tone.
+   Conclusion: a web app cannot make noise on a muted iPhone. The only untried
+   route is a <video> element, which would mean bundling an encoded video file
+   into this one-file app - not worth it on a fourth guess.
+   So: play the clip plainly, never claim an audio session, and let the visual
+   carry the timer, because his ringer is normally off. */
 
 let chimeEl = null;
 
@@ -1076,31 +1085,6 @@ function chimeNow(){
     if(p && p.catch) p.catch(() => {});
     return true;
   }catch(e){ return false; }
-}
-
-/* Temporary, until the phone tells us which mode works. Remove once settled. */
-function testSound(mode){
-  const out = document.getElementById("sndOut");
-  const has = !!navigator.audioSession;
-  const show = note => {
-    if(out) out.textContent =
-      "mode: " + mode + "  ->  " + note +
-      "\naudioSession: " + (has ? navigator.audioSession.type : "not supported") +
-      "\nclip readyState: " + (chimeEl ? chimeEl.readyState : "-");
-  };
-  try{
-    if(has && mode !== "none") navigator.audioSession.type = mode;
-    const el = chimeElement();
-    el.muted = false;
-    el.currentTime = 0;
-    const p = el.play();
-    if(p && p.then) p.then(() => show("play() resolved")).catch(e => show("blocked: " + e.name));
-    else show("play() returned nothing");
-  }catch(e){ show("error: " + e.message); }
-  if(has && mode !== "none"){
-    /* hand audio back so a test cannot leave his music stopped for good */
-    setTimeout(() => { try{ navigator.audioSession.type = "ambient"; }catch(e){} }, 2000);
-  }
 }
 
 const restLeft = () => Math.max(0, Math.ceil((restEnd - Date.now()) / 1000));
@@ -1582,19 +1566,6 @@ function viewSetup(){
       <div class="note" style="color:var(--muted);font-size:13px">Auto follows your iPhone's Display setting.</div>
     </div>
 
-    <div class="eyebrow">Sound check</div>
-    <div class="card pad" style="display:flex;flex-direction:column;gap:9px">
-      <div class="note" style="font-size:13px;color:var(--muted);line-height:1.5">
-        Ringer on silent, music playing. Tap each one and tell me two things: did it make a
-        sound, and did it stop the music. Modes 2 and 3 hand audio back after 2 seconds.
-      </div>
-      <button class="btn btn-wide" data-snd="none">1 &middot; Clip</button>
-      <button class="btn btn-wide" data-snd="ambient">2 &middot; Clip, mixing mode</button>
-      <button class="btn btn-wide" data-snd="playback">3 &middot; Clip, playback mode</button>
-      <div class="note" id="sndOut" style="font-family:var(--f-mono);font-size:11.5px;
-        color:var(--faint);line-height:1.6;white-space:pre-line">Tap one to test.</div>
-    </div>
-
     <div class="eyebrow">Rest timer</div>
     <div class="card pad">
       <div class="step-group">
@@ -1607,6 +1578,13 @@ function viewSetup(){
           <input id="restLen" type="number" inputmode="numeric" step="15" value="${S.restLen}">
           <button data-rest="+">+</button>
         </div>
+      </div>
+      <button class="btn btn-wide" id="testChime" style="min-height:44px;font-size:14px">
+        Test chime</button>
+      <div class="note" style="font-size:13px;color:var(--muted);line-height:1.5">
+        The chime needs your <b>ringer switch on</b>. With the phone muted, iOS silences web
+        apps entirely — tested every way there is. Muted, the timer goes bright lime and
+        flashes instead.
       </div>
     </div>
 
@@ -2390,8 +2368,10 @@ function wire(){
   };
 
   q("[data-goals]").forEach(b => b.onclick = () => openGoalsSheet(b.dataset.goals));
-  q("[data-snd]").forEach(b => b.onclick = () => testSound(b.dataset.snd));
   q("[data-cxgoals]").forEach(b => b.onclick = () => openEditSheet(b.dataset.cxgoals, () => render()));
+
+  const tc = document.getElementById("testChime");
+  if(tc) tc.onclick = () => { unlockAudio(); setTimeout(chimeNow, 120); };
 
   const nx = document.getElementById("newExBtn");
   if(nx) nx.onclick = () => openCreateSheet(() => render());
