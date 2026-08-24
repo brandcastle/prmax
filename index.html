@@ -149,7 +149,8 @@ button{font:inherit;color:inherit;cursor:pointer}
 .tile{display:flex;flex-direction:column;align-items:flex-start;gap:3px;text-align:left;
   background:var(--surface);border:1px solid var(--line);border-radius:12px;
   padding:15px 13px;min-height:88px;box-shadow:var(--shadow);
-  -webkit-tap-highlight-color:transparent;transition:transform .09s ease,border-color .12s ease}
+  -webkit-tap-highlight-color:transparent;transition:transform .09s ease,border-color .12s ease;
+  -webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
 .tile:active{transform:scale(.96);border-color:var(--accent)}
 .tile b{font-family:var(--f-disp);font-size:23px;font-weight:600;letter-spacing:.03em;
   text-transform:uppercase;line-height:1.05}
@@ -464,7 +465,7 @@ textarea{width:100%;min-height:150px;font-family:var(--f-mono);font-size:12px;
    ====================================================================== */
 
 const KEY = "ironledger.v1";
-const BUILD = "2026.08.24.15";   /* keep in step with version.txt */
+const BUILD = "2026.08.24.17";   /* keep in step with version.txt */
 
 /* ---------------- exercise library ---------------- */
 const EX = [
@@ -945,7 +946,7 @@ function progression(exId){
     return {state:"stall", load, lines:[
       "No new best in " + since + " sessions at " + loadPhrase(exId, load) + ".",
       "Best total: " + best.total + " reps (" + best.reps[0] + " + " + best.reps[1] + ").",
-      "Swap the exercise, or drop about 10% and rebuild."]};
+      "Swap it for today, or drop about 10% and rebuild."]};
   }
 
   let pace;
@@ -1272,6 +1273,9 @@ function viewToday(){
         <b>+ Something else</b><small style="margin-left:auto">full catalogue</small>
       </button>
     </div>
+    <div class="note" style="font-size:12.5px;color:var(--faint);text-align:center">
+      Machine taken? Long-press a tile — or open it and tap Swap. Just for today.
+    </div>
     <div class="btn-row">
       <button class="btn" data-end="1">End session</button>
       <button class="btn danger" data-discard="1">Discard session</button>
@@ -1334,6 +1338,7 @@ function loggerCard(e){
       <button class="btn btn-wide" data-next="${e.ex}">Next exercise</button>
       <div class="btn-row">
         <button class="btn" data-histsheet="${e.ex}">History</button>
+        <button class="btn" data-swap="${e.ex}">Swap</button>
         <button class="btn" data-rmex="${e.ex}">Remove</button>
       </div>
     </div>`;
@@ -1762,6 +1767,68 @@ function notice(title, line){
 
 /* full catalogue — used mid-session and from Setup */
 const isArchived = id => !!(exById[id] && exById[id].archived);
+
+/* Substitute an exercise for today only. s.plan already belongs to this session,
+   so editing it can never reach the day template in Setup. Sets already logged
+   under the original stay in s.entries and reappear in the grid's extras row, so
+   nothing you did is hidden or reattributed. Volume follows the substitute,
+   because weekVolume() counts by the exercise on each entry. */
+function swapExercise(fromId, toId){
+  closeSheet();
+  const s = workingSession();
+  const from = exById[fromId], to = exById[toId];
+  if(!s || !from || !to || fromId === toId) return;
+
+  /* copy the template down onto the session before editing it */
+  if(!s.plan || !s.plan.length) s.plan = (S.templates[s.day] || []).slice();
+  const i = s.plan.indexOf(fromId);
+  if(s.plan.includes(toId)){
+    if(i > -1) s.plan.splice(i, 1);        /* already on the list - just drop the original */
+  } else if(i > -1){
+    s.plan[i] = toId;
+  } else {
+    s.plan.push(toId);
+  }
+  /* an entry with nothing logged in it is clutter once swapped out */
+  s.entries = s.entries.filter(e => e.ex !== fromId || e.sets.length);
+  ui.openEx = null;
+  save(); render();
+  notice("Swapped for today",
+    to.n + " replaces " + from.n + " for this session only. Your templates are untouched.");
+}
+
+function openSwapSheet(fromId){
+  const def = exById[fromId];
+  if(!def) return;
+  openCatalogue(toId => swapExercise(fromId, toId), "Swap " + def.n + " for");
+}
+
+/* Long-press, touch and mouse. A 10px move cancels it, so scrolling the grid
+   never trips a swap. Returns a probe the click handler uses to stand down. */
+function wireLongPress(b){
+  let t = null, fired = false, x0 = 0, y0 = 0;
+  const start = (x, y) => {
+    x0 = x; y0 = y; fired = false;
+    clearTimeout(t);
+    t = setTimeout(() => {
+      fired = true;
+      b.classList.remove("pulse");
+      openSwapSheet(b.dataset.pick);
+    }, 500);
+  };
+  const move = (x, y) => { if(Math.abs(x - x0) > 10 || Math.abs(y - y0) > 10) clearTimeout(t); };
+  const end = () => clearTimeout(t);
+  b.addEventListener("touchstart", e => start(e.touches[0].clientX, e.touches[0].clientY), {passive:true});
+  b.addEventListener("touchmove",  e => move(e.touches[0].clientX, e.touches[0].clientY), {passive:true});
+  b.addEventListener("touchend", end);
+  b.addEventListener("touchcancel", end);
+  b.addEventListener("mousedown", e => start(e.clientX, e.clientY));
+  b.addEventListener("mousemove", e => move(e.clientX, e.clientY));
+  b.addEventListener("mouseup", end);
+  b.addEventListener("mouseleave", end);
+  b.addEventListener("contextmenu", e => e.preventDefault());
+  return () => fired;
+}
 
 function openCatalogue(onPick, title, opts){
   const o = opts || {};
@@ -2225,10 +2292,14 @@ function wire(){
     setTimeout(() => startDay(b.dataset.day), 130);
   });
 
-  q("[data-pick]").forEach(b => b.onclick = () => {
-    b.classList.add("pulse");
-    const id = b.dataset.pick;
-    setTimeout(() => pickExercise(id), 130);
+  q("[data-pick]").forEach(b => {
+    const longPressed = wireLongPress(b);
+    b.onclick = () => {
+      if(longPressed()) return;          /* the long press already opened the swap */
+      b.classList.add("pulse");
+      const id = b.dataset.pick;
+      setTimeout(() => pickExercise(id), 130);
+    };
   });
 
   q("[data-openall]").forEach(b => b.onclick = () => openCatalogue(pickExercise, "Anything else"));
@@ -2325,6 +2396,7 @@ function wire(){
     ui.histEx = b.dataset.hist || null; ui.tab = "history"; render();
   });
   q("[data-histsheet]").forEach(b => b.onclick = () => openHistorySheet(b.dataset.histsheet));
+  q("[data-swap]").forEach(b => b.onclick = () => openSwapSheet(b.dataset.swap));
   q("[data-discard]").forEach(b => b.onclick = () => {
     const cur = workingSession();
     if(!cur) return;
