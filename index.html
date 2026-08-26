@@ -241,7 +241,10 @@ button{font:inherit;color:inherit;cursor:pointer}
 
 /* ---------- volume ---------- */
 .vol{display:flex;flex-direction:column;gap:9px;padding:12px 14px}
-.vol-row{display:grid;grid-template-columns:104px 1fr 38px;gap:10px;align-items:center}
+.vol-row{display:grid;grid-template-columns:104px 1fr 38px;gap:10px;align-items:center;
+  width:100%;background:none;border:0;padding:0;font:inherit;color:inherit;text-align:left;
+  -webkit-tap-highlight-color:transparent;transition:opacity .1s ease}
+.vol-row:active{opacity:.6}
 .vol-name{font-size:14px;font-weight:500;line-height:1.2}
 .vol-name small{display:block;font-family:var(--f-mono);font-size:10.5px;color:var(--faint);
   font-weight:400;letter-spacing:.02em;margin-top:1px}
@@ -474,7 +477,7 @@ textarea{width:100%;min-height:150px;font-family:var(--f-mono);font-size:12px;
    ====================================================================== */
 
 const KEY = "ironledger.v1";
-const BUILD = "2026.08.24.20";   /* keep in step with version.txt */
+const BUILD = "2026.08.24.21";   /* keep in step with version.txt */
 
 /* ---------------- exercise library ---------------- */
 const EX = [
@@ -1372,17 +1375,17 @@ function viewVolume(){
     /* room for the target band, and for whatever the bar actually adds up to */
     const scale = Math.max(t.hi * 1.5, d + sc, 1);
     const cls = d < t.lo ? "low" : d > t.hi ? "high" : "";   /* direct only */
-    return `<div class="vol-row">
-      <div class="vol-name">${esc(m.n)}<small>target ${t.lo}–${t.hi}</small></div>
-      <div class="vol-track">
-        <div class="vol-zone" style="left:${(t.lo/scale)*100}%;width:${((t.hi-t.lo)/scale)*100}%"></div>
-        <div class="vol-bars">
+    return `<button class="vol-row" data-muscle="${m.id}">
+      <span class="vol-name">${esc(m.n)}<small>target ${t.lo}–${t.hi}</small></span>
+      <span class="vol-track">
+        <span class="vol-zone" style="left:${(t.lo/scale)*100}%;width:${((t.hi-t.lo)/scale)*100}%"></span>
+        <span class="vol-bars">
           <span class="vol-fill ${cls}" style="width:${(d/scale)*100}%"></span>
           ${sc ? `<span class="vol-sec" style="width:${(sc/scale)*100}%"></span>` : ""}
-        </div>
-      </div>
-      <div class="vol-num ${cls}">${d}${sc ? `<small>+${sc}</small>` : ""}</div>
-    </div>`;
+        </span>
+      </span>
+      <span class="vol-num ${cls}">${d}${sc ? `<small>+${sc}</small>` : ""}</span>
+    </button>`;
   }).join("");
 
   const under = MUSCLES.filter(m => vol[m.id].direct < targetFor(m.id).lo).map(m => m.n);
@@ -1391,6 +1394,9 @@ function viewVolume(){
   return `
     <div class="eyebrow">This week · ${esc(weekRangeLabel())}</div>
     <div class="card vol">${rows}</div>
+    <div class="note" style="font-size:12.5px;color:var(--faint);text-align:center">
+      Tap a muscle to see what built that bar.
+    </div>
     <div class="card pad">
       <h3 class="sec">Read</h3>
       <div class="note" style="margin-top:6px">
@@ -1853,6 +1859,64 @@ function wireLongPress(b){
   b.addEventListener("mouseleave", end);
   b.addEventListener("contextmenu", e => e.preventDefault());
   return () => fired;
+}
+
+/* Which exercises fed a muscle's bar this week, split the same way the bar is.
+   Same weekStart filter as weekVolume(), so the two can never disagree. */
+function muscleBreakdown(mid){
+  const wk = weekStart(todayISO());
+  const direct = {}, indirect = {};
+  for(const s of S.sessions){
+    if(weekStart(s.date) !== wk) continue;
+    for(const e of s.entries){
+      const def = exById[e.ex];
+      if(!def || !e.sets.length) continue;
+      if(def.m === mid) direct[e.ex] = (direct[e.ex] || 0) + e.sets.length;
+      else if((def.sec || []).includes(mid)) indirect[e.ex] = (indirect[e.ex] || 0) + e.sets.length;
+    }
+  }
+  return {direct, indirect};
+}
+
+function openMuscleSheet(mid){
+  const m = muscleById[mid];
+  if(!m) return;
+  const t = targetFor(mid), v = weekVolume()[mid], b = muscleBreakdown(mid);
+  const sets = n => n + " set" + (n === 1 ? "" : "s");
+
+  const row = id => {
+    const def = exById[id];
+    if(!def) return "";
+    const n = b.direct[id] || b.indirect[id];
+    return `<button class="pick" data-mex="${id}">
+      <div class="pick-row">
+        <div style="min-width:0">
+          <b>${esc(def.n)}</b>
+          <small>${esc(muscleById[def.m].n)} ${chipFor(id)}</small>
+        </div>
+        <div class="pick-last"><span class="chip">${sets(n)}</span></div>
+      </div></button>`;
+  };
+  const list = o => Object.keys(o).sort((a, c) => o[c] - o[a]).map(row).join("");
+
+  const hasD = Object.keys(b.direct).length, hasS = Object.keys(b.indirect).length;
+  const body = `
+    ${hasD ? `<div class="eyebrow" style="padding:13px 16px 5px">Direct · ${sets(v.direct)}</div>
+      ${list(b.direct)}` : ""}
+    ${hasS ? `<div class="eyebrow" style="padding:13px 16px 5px">Came along · ${sets(v.sec)}</div>
+      ${list(b.indirect)}` : ""}
+    ${!hasD && !hasS ? `<div class="pad note" style="color:var(--muted)">Nothing this week.</div>` : ""}
+    <div class="pad note" style="color:var(--muted);font-size:13px;line-height:1.5">
+      Only the direct sets count against your ${t.lo}–${t.hi} target.${(hasD || hasS)
+        ? " Tap an exercise for its history." : ""}
+    </div>`;
+
+  sheet(m.n, body, `<div class="queue-hero">
+      <div class="kicker">This week · target ${t.lo}–${t.hi}</div>
+      <div class="line">${sets(v.direct)} direct${v.sec ? ", " + v.sec + " indirect" : ""}.</div></div>`);
+
+  document.querySelectorAll("[data-mex]").forEach(btn =>
+    btn.onclick = () => openHistorySheet(btn.dataset.mex));
 }
 
 function openCatalogue(onPick, title, opts){
@@ -2422,6 +2486,7 @@ function wire(){
   });
   q("[data-histsheet]").forEach(b => b.onclick = () => openHistorySheet(b.dataset.histsheet));
   q("[data-swap]").forEach(b => b.onclick = () => openSwapSheet(b.dataset.swap));
+  q("[data-muscle]").forEach(b => b.onclick = () => openMuscleSheet(b.dataset.muscle));
   q("[data-discard]").forEach(b => b.onclick = () => {
     const cur = workingSession();
     if(!cur) return;
