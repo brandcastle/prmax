@@ -25,6 +25,7 @@
   --faint:#68715F;
   --accent:#3F6E12;
   --accent-bright:#A6E22E;
+  --accent-pale:#CDEB8F;
   --accent-soft:#EAF7D0;
   --on-lime:#12150F;
   --ready:#0F766E;
@@ -52,6 +53,7 @@
     --faint:#9AA48F;
     --accent:#B6E84A;
     --accent-bright:#A6E22E;
+    --accent-pale:#5E7F2E;
     --accent-soft:#25330F;
     --on-lime:#12150F;
     --ready:#5EEAD4;
@@ -75,6 +77,7 @@
   --faint:#9AA48F;
   --accent:#B6E84A;
   --accent-bright:#A6E22E;
+  --accent-pale:#5E7F2E;
   --accent-soft:#25330F;
   --on-lime:#12150F;
   --ready:#5EEAD4;
@@ -247,14 +250,14 @@ button{font:inherit;color:inherit;cursor:pointer}
 .vol-bars{position:absolute;inset:0;display:flex}
 .vol-fill{height:100%;background:var(--accent-bright)}
 .vol-sec{height:100%;background:var(--indirect)}
-.vol-fill.low{background:var(--stall)}
+.vol-fill.low{background:var(--accent-pale)}
 .vol-fill.high{background:var(--hold)}
 .vol-zone{position:absolute;top:0;bottom:0;background:var(--accent-soft);
   border-left:1px solid var(--line-strong);border-right:1px solid var(--line-strong)}
 .vol-num{font-family:var(--f-mono);font-size:15px;font-weight:600;text-align:right;
   color:var(--text);font-variant-numeric:tabular-nums;line-height:1.15}
 .vol-num small{display:block;font-size:10.5px;font-weight:600;color:var(--indirect)}
-.vol-num.low{color:var(--stall)}
+.vol-num.low{color:var(--muted)}
 .vol-num.high{color:var(--hold)}
 
 /* ---------- history / calendar ---------- */
@@ -471,7 +474,7 @@ textarea{width:100%;min-height:150px;font-family:var(--f-mono);font-size:12px;
    ====================================================================== */
 
 const KEY = "ironledger.v1";
-const BUILD = "2026.08.24.19";   /* keep in step with version.txt */
+const BUILD = "2026.08.24.20";   /* keep in step with version.txt */
 
 /* ---------------- exercise library ---------------- */
 const EX = [
