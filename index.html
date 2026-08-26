@@ -465,7 +465,7 @@ textarea{width:100%;min-height:150px;font-family:var(--f-mono);font-size:12px;
    ====================================================================== */
 
 const KEY = "ironledger.v1";
-const BUILD = "2026.08.24.17";   /* keep in step with version.txt */
+const BUILD = "2026.08.24.18";   /* keep in step with version.txt */
 
 /* ---------------- exercise library ---------------- */
 const EX = [
@@ -949,17 +949,19 @@ function progression(exId){
       "Swap it for today, or drop about 10% and rebuild."]};
   }
 
+  /* Say what to do, not what already happened. One more rep on each of the counted
+     sets from your best session here, capped at the top of the range. Anchored on
+     the best rather than on last time, so hitting the target always registers as
+     progress - a target that merely ties the best would read back as "no new best"
+     the moment he hit it. */
+  const target = best ? best.reps.map(r => Math.min(r + 1, def.rh)) : null;
+
   let pace;
-  if(working.length < 2){
-    pace = "Log 2 sets at " + def.rh + " reps to move up.";
-  } else if(hits === 1){
-    pace = "One more set at " + def.rh + " reps and the load goes up.";
-  } else if(since === 0 && scored.length >= 2){
-    pace = "New best last time — " + best.total + " total. Beat it again.";
-  } else if(climbing){
-    pace = "Set 2 is still climbing — that's the progress.";
-  } else if(best){
-    pace = "Beat " + best.total + " to progress. " + def.rh + " on both sets moves the load.";
+  if(target){
+    pace = "Go for " + target.join(" and ")
+         + (target.every(r => r >= def.rh) ? " — that moves the load up." : ".");
+  } else if(working.length < 2){
+    pace = "Log 2 sets at " + def.rl + "–" + def.rh + " reps.";
   } else {
     const gap = def.rh - Math.max(...working.map(x => x.r));
     pace = gap + (gap === 1 ? " rep" : " reps") + " to go on your best set.";
@@ -968,7 +970,9 @@ function progression(exId){
   return {state:"hold", load, lines:[
     "Keep " + loadPhrase(exId, load) + " this session.",
     "Last time: " + shown + (best
-      ? " — best here is " + best.total + " total (" + best.reps[0] + " + " + best.reps[1] + ")."
+      ? (since === 0
+          ? " — your best at this load."          /* don't say the same numbers twice */
+          : " — best here is " + best.total + " total (" + best.reps[0] + " + " + best.reps[1] + ").")
       : " — hit " + def.rh + " reps on your best two sets to move up."),
     pace]};
 }
