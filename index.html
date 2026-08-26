@@ -32,6 +32,7 @@
   --hold:#835E0C;
   --hold-soft:#F5EBD3;
   --stall:#A63A27;
+  --indirect:#3E6FA8;
   --stall-soft:#F7E0DA;
   --shadow:0 1px 2px rgba(18,21,15,.08),0 6px 18px rgba(18,21,15,.05);
 
@@ -58,6 +59,7 @@
     --hold:#E6BE68;
     --hold-soft:#3A2C0B;
     --stall:#F0907A;
+    --indirect:#8FBCE8;
     --stall-soft:#40201A;
     --shadow:0 1px 2px rgba(0,0,0,.45),0 6px 18px rgba(0,0,0,.3);
   }
@@ -80,6 +82,7 @@
   --hold:#E6BE68;
   --hold-soft:#3A2C0B;
   --stall:#F0907A;
+  --indirect:#8FBCE8;
   --stall-soft:#40201A;
   --shadow:0 1px 2px rgba(0,0,0,.45),0 6px 18px rgba(0,0,0,.3);
 }
@@ -235,19 +238,22 @@ button{font:inherit;color:inherit;cursor:pointer}
 
 /* ---------- volume ---------- */
 .vol{display:flex;flex-direction:column;gap:9px;padding:12px 14px}
-.vol-row{display:grid;grid-template-columns:108px 1fr 30px;gap:10px;align-items:center}
+.vol-row{display:grid;grid-template-columns:104px 1fr 38px;gap:10px;align-items:center}
 .vol-name{font-size:14px;font-weight:500;line-height:1.2}
 .vol-name small{display:block;font-family:var(--f-mono);font-size:10.5px;color:var(--faint);
   font-weight:400;letter-spacing:.02em;margin-top:1px}
 .vol-track{height:12px;background:var(--surface-2);border-radius:999px;
   overflow:hidden;position:relative}
-.vol-fill{height:100%;border-radius:999px;background:var(--accent-bright);position:relative}
+.vol-bars{position:absolute;inset:0;display:flex}
+.vol-fill{height:100%;background:var(--accent-bright)}
+.vol-sec{height:100%;background:var(--indirect)}
 .vol-fill.low{background:var(--stall)}
 .vol-fill.high{background:var(--hold)}
 .vol-zone{position:absolute;top:0;bottom:0;background:var(--accent-soft);
   border-left:1px solid var(--line-strong);border-right:1px solid var(--line-strong)}
 .vol-num{font-family:var(--f-mono);font-size:15px;font-weight:600;text-align:right;
-  color:var(--text);font-variant-numeric:tabular-nums}
+  color:var(--text);font-variant-numeric:tabular-nums;line-height:1.15}
+.vol-num small{display:block;font-size:10.5px;font-weight:600;color:var(--indirect)}
 .vol-num.low{color:var(--stall)}
 .vol-num.high{color:var(--hold)}
 
@@ -465,47 +471,47 @@ textarea{width:100%;min-height:150px;font-family:var(--f-mono);font-size:12px;
    ====================================================================== */
 
 const KEY = "ironledger.v1";
-const BUILD = "2026.08.24.18";   /* keep in step with version.txt */
+const BUILD = "2026.08.24.19";   /* keep in step with version.txt */
 
 /* ---------------- exercise library ---------------- */
 const EX = [
-  {id:"incdb",   n:"Incline Dumbbell Press", m:"chest",     u:"lb", rl:6,  rh:12, inc:5,   note:"per dumbbell"},
-  {id:"fly",     n:"Machine Chest Fly",      m:"chest",     u:"lb", rl:8,  rh:15, inc:10},
-  {id:"dips",    n:"Dips",                   m:"chest",     u:"lb", rl:6,  rh:12, inc:5,   bw:true},
-  {id:"sdip",    n:"Seated Dip Machine",     m:"triceps",   u:"lb", rl:8,  rh:15, inc:10},
+  {id:"incdb",   n:"Incline Dumbbell Press", m:"chest", sec:["frontdelt","triceps"],     u:"lb", rl:6,  rh:12, inc:5,   note:"per dumbbell"},
+  {id:"fly",     n:"Machine Chest Fly",      m:"chest", sec:["frontdelt"],     u:"lb", rl:8,  rh:15, inc:10},
+  {id:"dips",    n:"Dips",                   m:"chest", sec:["triceps","frontdelt"],     u:"lb", rl:6,  rh:12, inc:5,   bw:true},
+  {id:"sdip",    n:"Seated Dip Machine",     m:"triceps", sec:["chest","frontdelt"],   u:"lb", rl:8,  rh:15, inc:10},
   {id:"pushdn",  n:"Rope Triceps Pushdown",  m:"triceps",   u:"lb", rl:10, rh:15, inc:5},
   {id:"skull",   n:"Skull Crusher",          m:"triceps",   u:"lb", rl:8,  rh:15, inc:5},
   {id:"ohext",   n:"Overhead Rope Extension",m:"triceps",   u:"lb", rl:8,  rh:12, inc:5},
-  {id:"pullup",  n:"Pull-Up",                m:"back",      u:"lb", rl:6,  rh:12, inc:5,   bw:true},
-  {id:"pulldn",  n:"Close-Grip Pulldown",    m:"back",      u:"lb", rl:8,  rh:12, inc:7},
-  {id:"mrow",    n:"Machine Row",            m:"back",      u:"lb", rl:8,  rh:12, inc:10},
-  {id:"prow",    n:"Plated Machine Row",     m:"back",      u:"lb", rl:8,  rh:12, inc:10},
+  {id:"pullup",  n:"Pull-Up",                m:"back", sec:["biceps","forearms","reardelt"],      u:"lb", rl:6,  rh:12, inc:5,   bw:true},
+  {id:"pulldn",  n:"Close-Grip Pulldown",    m:"back", sec:["biceps","forearms"],      u:"lb", rl:8,  rh:12, inc:7},
+  {id:"mrow",    n:"Machine Row",            m:"back", sec:["biceps","reardelt","forearms"],      u:"lb", rl:8,  rh:12, inc:10},
+  {id:"prow",    n:"Plated Machine Row",     m:"back", sec:["biceps","reardelt","forearms"],      u:"lb", rl:8,  rh:12, inc:10},
   {id:"latdb",   n:"Dumbbell Lateral Raise", m:"sidedelt",  u:"lb", rl:10, rh:15, inc:2.5},
   {id:"latcbl",  n:"Cable Lateral Raise",    m:"sidedelt",  u:"lb", rl:10, rh:15, inc:2.5},
-  {id:"facepull",n:"Rear Delt Face Pull",    m:"reardelt",  u:"lb", rl:10, rh:15, inc:7},
-  {id:"rdfly",   n:"Rear Delt Fly",          m:"reardelt",  u:"lb", rl:10, rh:15, inc:7},
-  {id:"rdcbl",   n:"Single-Arm Cable Rear Fly",m:"reardelt",u:"lb", rl:10, rh:15, inc:2.5},
-  {id:"inccurl", n:"Incline Dumbbell Curl",  m:"biceps",    u:"lb", rl:8,  rh:12, inc:5,   note:"per dumbbell"},
-  {id:"cblcurl", n:"Cable Biceps Curl",      m:"biceps",    u:"lb", rl:8,  rh:15, inc:5},
-  {id:"hammer",  n:"Cross-Body Hammer Curl", m:"biceps",    u:"lb", rl:8,  rh:12, inc:5},
-  {id:"legpress",n:"Leg Press",              m:"quads",     u:"lb", rl:8,  rh:12, inc:20},
-  {id:"bssq",    n:"BSS — quad bias",        m:"quads",     u:"lb", rl:8,  rh:12, inc:5,   note:"upright torso"},
+  {id:"facepull",n:"Rear Delt Face Pull",    m:"reardelt", sec:["back"],  u:"lb", rl:10, rh:15, inc:7},
+  {id:"rdfly",   n:"Rear Delt Fly",          m:"reardelt", sec:["back"],  u:"lb", rl:10, rh:15, inc:7},
+  {id:"rdcbl",   n:"Single-Arm Cable Rear Fly",m:"reardelt", sec:["back"],u:"lb", rl:10, rh:15, inc:2.5},
+  {id:"inccurl", n:"Incline Dumbbell Curl",  m:"biceps", sec:["forearms"],    u:"lb", rl:8,  rh:12, inc:5,   note:"per dumbbell"},
+  {id:"cblcurl", n:"Cable Biceps Curl",      m:"biceps", sec:["forearms"],    u:"lb", rl:8,  rh:15, inc:5},
+  {id:"hammer",  n:"Cross-Body Hammer Curl", m:"biceps", sec:["forearms"],    u:"lb", rl:8,  rh:12, inc:5},
+  {id:"legpress",n:"Leg Press",              m:"quads", sec:["glutes","adductors"],     u:"lb", rl:8,  rh:12, inc:20},
+  {id:"bssq",    n:"BSS — quad bias",        m:"quads", sec:["glutes","adductors"],     u:"lb", rl:8,  rh:12, inc:5,   note:"upright torso"},
   {id:"legext",  n:"Single-Leg Extension",   m:"quads",     u:"lb", rl:10, rh:15, inc:5},
-  {id:"goblet",  n:"Goblet Squat",           m:"quads",     u:"lb", rl:8,  rh:12, inc:5},
-  {id:"lunge",   n:"Walking Lunge",          m:"quads",     u:"lb", rl:8,  rh:12, inc:10},
-  {id:"rdl",     n:"Romanian Deadlift",      m:"hamstrings",u:"lb", rl:8,  rh:10, inc:10,  note:"2 RIR — do not chase failure"},
-  {id:"legcurl", n:"Lying Leg Curl",         m:"hamstrings",u:"lb", rl:8,  rh:12, inc:10},
-  {id:"slcurl",  n:"Single-Leg Lying Curl",  m:"hamstrings",u:"lb", rl:8,  rh:12, inc:5},
-  {id:"backext", n:"45° Back Extension",     m:"hamstrings",u:"lb", rl:10, rh:15, inc:10},
-  {id:"bssg",    n:"BSS — glute bias",       m:"glutes",    u:"lb", rl:8,  rh:12, inc:5,   note:"forward lean — knee-friendly"},
-  {id:"thrust",  n:"Glute Drive / Hip Thrust",m:"glutes",   u:"lb", rl:8,  rh:12, inc:20},
-  {id:"gluteext",n:"Glute Extension",        m:"glutes",    u:"lb", rl:10, rh:15, inc:5},
+  {id:"goblet",  n:"Goblet Squat",           m:"quads", sec:["glutes","adductors","abs"],     u:"lb", rl:8,  rh:12, inc:5},
+  {id:"lunge",   n:"Walking Lunge",          m:"quads", sec:["glutes","hamstrings","adductors"],     u:"lb", rl:8,  rh:12, inc:10},
+  {id:"rdl",     n:"Romanian Deadlift",      m:"hamstrings", sec:["glutes","back","forearms"],u:"lb", rl:8,  rh:10, inc:10,  note:"2 RIR — do not chase failure"},
+  {id:"legcurl", n:"Lying Leg Curl",         m:"hamstrings", sec:["calves"],u:"lb", rl:8,  rh:12, inc:10},
+  {id:"slcurl",  n:"Single-Leg Lying Curl",  m:"hamstrings", sec:["calves"],u:"lb", rl:8,  rh:12, inc:5},
+  {id:"backext", n:"45° Back Extension",     m:"hamstrings", sec:["glutes","back"],u:"lb", rl:10, rh:15, inc:10},
+  {id:"bssg",    n:"BSS — glute bias",       m:"glutes", sec:["quads","hamstrings","adductors"],    u:"lb", rl:8,  rh:12, inc:5,   note:"forward lean — knee-friendly"},
+  {id:"thrust",  n:"Glute Drive / Hip Thrust",m:"glutes", sec:["hamstrings","quads"],   u:"lb", rl:8,  rh:12, inc:20},
+  {id:"gluteext",n:"Glute Extension",        m:"glutes", sec:["hamstrings"],    u:"lb", rl:10, rh:15, inc:5},
   {id:"add",     n:"Hip Adduction",          m:"adductors", u:"lb", rl:10, rh:15, inc:10},
-  {id:"abd",     n:"Hip Abduction",          m:"abductors", u:"lb", rl:10, rh:15, inc:10},
+  {id:"abd",     n:"Hip Abduction",          m:"abductors", sec:["glutes"], u:"lb", rl:10, rh:15, inc:10},
   {id:"calf",    n:"Calf Raise",             m:"calves",    u:"lb", rl:12, rh:20, inc:10},
   {id:"crunchw", n:"Weighted Crunch",        m:"abs",       u:"lb", rl:8,  rh:15, inc:5},
   {id:"crunchm", n:"Machine Crunch",         m:"abs",       u:"lb", rl:10, rh:15, inc:10},
-  {id:"hlr",     n:"Hanging Leg Raise",      m:"abs",       u:"lb", rl:10, rh:20, inc:5,   bw:true},
+  {id:"hlr",     n:"Hanging Leg Raise",      m:"abs", sec:["forearms"],       u:"lb", rl:10, rh:20, inc:5,   bw:true},
   /* --- cardio: logged in minutes --- */
   {id:"walk",    n:"Walk",                m:"cardio", kind:"time", step:5, note:"active recovery"},
   {id:"incline", n:"Incline Treadmill",   m:"cardio", kind:"time", step:5},
@@ -533,10 +539,10 @@ const MUSCLES = [
   {id:"triceps",   n:"Triceps",    lo:8,  hi:14},
   {id:"quads",     n:"Quads",      lo:10, hi:16},
   {id:"hamstrings",n:"Hamstrings", lo:8,  hi:12},
-  {id:"glutes",    n:"Glutes",     lo:8,  hi:14},
+  {id:"glutes",    n:"Glutes (max)", lo:8, hi:14},
   {id:"calves",    n:"Calves",     lo:6,  hi:12},
   {id:"adductors", n:"Adductors",  lo:2,  hi:6},
-  {id:"abductors", n:"Abductors",  lo:2,  hi:6},
+  {id:"abductors", n:"Glutes (med)", lo:2, hi:6},
   {id:"abs",       n:"Abs",        lo:6,  hi:12},
   {id:"forearms",  n:"Forearms",   lo:4,  hi:8},
 ];
@@ -992,15 +998,21 @@ function chipFor(exId){
 }
 
 /* weekly volume — cardio excluded, it isn't a muscle */
+/* Two numbers per muscle: sets where it was the point of the exercise, and sets
+   where it only came along. Only the direct count is judged against the target
+   band, which is why none of the 14 bands needed re-tuning when this landed. */
 function weekVolume(){
   const out = {};
-  MUSCLES.forEach(m => out[m.id] = 0);
+  MUSCLES.forEach(m => out[m.id] = {direct:0, sec:0});
   const wk = weekStart(todayISO());
   for(const s of S.sessions){
     if(weekStart(s.date) !== wk) continue;   /* resets on its own each Sunday */
     for(const e of s.entries){
       const def = exById[e.ex];
-      if(def && out[def.m] !== undefined) out[def.m] += e.sets.length;
+      if(!def) continue;
+      const n = e.sets.length;
+      if(out[def.m]) out[def.m].direct += n;
+      (def.sec || []).forEach(mid => { if(out[mid]) out[mid].sec += n; });
     }
   }
   return out;
@@ -1352,22 +1364,26 @@ function loggerCard(e){
 function viewVolume(){
   const vol = weekVolume();
   const rows = MUSCLES.map(m => {
-    const n = vol[m.id];
+    const d = vol[m.id].direct, sc = vol[m.id].sec;
     const t = targetFor(m.id);
-    const scale = Math.max(t.hi * 1.5, 1);  /* headroom so overshoot is visible */
-    const cls = n < t.lo ? "low" : n > t.hi ? "high" : "";
+    /* room for the target band, and for whatever the bar actually adds up to */
+    const scale = Math.max(t.hi * 1.5, d + sc, 1);
+    const cls = d < t.lo ? "low" : d > t.hi ? "high" : "";   /* direct only */
     return `<div class="vol-row">
       <div class="vol-name">${esc(m.n)}<small>target ${t.lo}–${t.hi}</small></div>
       <div class="vol-track">
         <div class="vol-zone" style="left:${(t.lo/scale)*100}%;width:${((t.hi-t.lo)/scale)*100}%"></div>
-        <div class="vol-fill ${cls}" style="width:${Math.min(100,(n/scale)*100)}%"></div>
+        <div class="vol-bars">
+          <span class="vol-fill ${cls}" style="width:${(d/scale)*100}%"></span>
+          ${sc ? `<span class="vol-sec" style="width:${(sc/scale)*100}%"></span>` : ""}
+        </div>
       </div>
-      <div class="vol-num ${cls}">${n}</div>
+      <div class="vol-num ${cls}">${d}${sc ? `<small>+${sc}</small>` : ""}</div>
     </div>`;
   }).join("");
 
-  const under = MUSCLES.filter(m => vol[m.id] < targetFor(m.id).lo).map(m => m.n);
-  const over  = MUSCLES.filter(m => vol[m.id] > targetFor(m.id).hi).map(m => m.n);
+  const under = MUSCLES.filter(m => vol[m.id].direct < targetFor(m.id).lo).map(m => m.n);
+  const over  = MUSCLES.filter(m => vol[m.id].direct > targetFor(m.id).hi).map(m => m.n);
 
   return `
     <div class="eyebrow">This week · ${esc(weekRangeLabel())}</div>
@@ -1384,8 +1400,10 @@ function viewVolume(){
         so far. Counts reset every Sunday.
       </div>
       <div class="note" style="margin-top:8px;color:var(--muted);font-size:13px">
-        Direct sets only — indirect work (biceps in pulldowns, rear delts in rows) sits on top
-        of these numbers, which is why the rear delt band is deliberately low. Cardio isn't counted.
+        <b style="color:var(--accent)">Green</b> is sets where that muscle was the point of the
+        exercise. <b style="color:var(--indirect)">Blue</b> is sets where it only came along —
+        biceps in a pulldown, chest in a dip. <b>Only green counts against your target</b>, so the
+        blue is information, not a score. Cardio isn't counted.
       </div>
     </div>`;
 }
