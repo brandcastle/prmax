@@ -419,6 +419,22 @@ button{font:inherit;color:inherit;cursor:pointer}
   background:var(--stall-soft);color:var(--stall);border-radius:8px;font-size:15px;line-height:1;
   -webkit-tap-highlight-color:transparent}
 .hist-del:active{transform:scale(.9)}
+.hist-edit{flex:0 0 auto;width:42px;min-height:42px;border:1px solid var(--line-strong);
+  background:var(--surface);color:var(--muted);border-radius:9px;font-size:15px;cursor:pointer}
+.hist-edit:active{transform:scale(.9)}
+.ed-wrap{padding:6px 16px 16px;display:flex;flex-direction:column;gap:14px}
+.ed-block{border:1px solid var(--line);border-radius:11px;overflow:hidden}
+.ed-head{display:flex;align-items:center;gap:8px;padding:9px 10px 9px 12px;
+  background:var(--surface-2);border-bottom:1px solid var(--line)}
+.ed-name{flex:1;min-width:0;font-size:14.5px;font-weight:600}
+.ed-set{display:flex;align-items:center;gap:10px;width:100%;padding:11px 12px;min-height:46px;
+  border:0;border-bottom:1px solid var(--line);background:none;color:inherit;
+  text-align:left;font:inherit;cursor:pointer}
+.ed-set:active{background:var(--surface-2)}
+.ed-num{flex:0 0 auto;font-family:var(--f-mono);font-size:11.5px;color:var(--faint)}
+.ed-val{flex:1;min-width:0;font-family:var(--f-mono);font-size:13.5px}
+.ed-go{flex:0 0 auto;font-size:12px;color:var(--muted)}
+.ed-empty{padding:11px 12px;font-size:13.5px;color:var(--muted)}
 .saved{font-family:var(--f-mono);font-size:11.5px;font-weight:600;letter-spacing:.08em;
   text-transform:uppercase;color:var(--ready);opacity:0;transition:opacity .18s ease}
 .saved.on{opacity:1}
@@ -477,7 +493,7 @@ textarea{width:100%;min-height:150px;font-family:var(--f-mono);font-size:12px;
    ====================================================================== */
 
 const KEY = "ironledger.v1";
-const BUILD = "2026.08.24.21";   /* keep in step with version.txt */
+const BUILD = "2026.08.28.22";   /* keep in step with version.txt */
 
 /* ---------------- exercise library ---------------- */
 const EX = [
@@ -1502,8 +1518,12 @@ function sessionCard(x){
         ${setPills(e.ex, e.sets, true)}
       </div>`).join("")}
     </div>
-    <button class="btn btn-wide danger" data-delsess="${x.date}"
-      style="margin-top:12px;min-height:44px;font-size:14px">Delete this session</button>
+    <div class="btn-row" style="margin-top:12px">
+      <button class="btn" data-editsess="${x.date}"
+        style="min-height:44px;font-size:14px">Edit sets</button>
+      <button class="btn danger" data-delsess="${x.date}"
+        style="min-height:44px;font-size:14px">Delete session</button>
+    </div>
   </div></div>`;
 }
 
@@ -1518,6 +1538,7 @@ function listView(){
             <div class="hist-date">${fmtDate(x.date).toUpperCase()} · ${x.entries.reduce((a,e)=>a+e.sets.length,0)} sets</div>
             <div class="hist-title">${esc(sessName(x))}</div>
           </div>
+          <button class="hist-edit" data-editsess="${x.date}" aria-label="edit session">✎</button>
           <button class="hist-del" data-delsess="${x.date}" aria-label="delete session">✕</button>
         </div>
         <div class="hist-body">
@@ -1770,11 +1791,14 @@ function askConfirm(o){
         style="min-height:52px">${esc(o.yes || "Confirm")}</button>
       <button class="btn btn-wide" data-no="1">Cancel</button>
     </div>`;
+  /* onNo lets a caller that opened this from its own sheet put that sheet back,
+     instead of a cancel dumping you all the way out to the app */
+  const back = () => { closeSheet(); if(o.onNo) o.onNo(); };
   sheet(o.title, body, `<div class="queue-hero">
       <div class="kicker">${esc(o.kicker || "")}</div>
-      <div class="line">${esc(o.line || "")}</div></div>`);
+      <div class="line">${esc(o.line || "")}</div></div>`, {onDismiss:back});
   document.querySelector("[data-yes]").onclick = () => { closeSheet(); o.onYes(); };
-  document.querySelector("[data-no]").onclick = closeSheet;
+  document.querySelector("[data-no]").onclick = back;
 }
 
 /* a delete that only happened in memory is worse than one that failed loudly */
@@ -1794,6 +1818,198 @@ function notice(title, line){
       <button class="btn btn-primary btn-wide" data-no="1">OK</button></div>`;
   sheet(title, body, `<div class="queue-hero"><div class="line">${esc(line)}</div></div>`);
   document.querySelector("[data-no]").onclick = closeSheet;
+}
+
+/* ---------- EDIT A PAST SESSION ----------
+   Deliberately not the logger: no ui.activeSession, no rest timer, no
+   progression hints. A session you are fixing can never quietly absorb
+   today's sets, and today's advice can never be computed from a day you
+   are halfway through rewriting. save() re-fingerprints that date, so the
+   Sheet mirror follows on its own. */
+const sessById = date => S.sessions.find(x => x.date === date) || null;
+const qq = sel => document.querySelectorAll(sel);
+
+function editSessionBody(sess){
+  const blocks = sess.entries.map(e => {
+    const def = exById[e.ex] || {n:e.ex};
+    return `<div class="ed-block">
+      <div class="ed-head">
+        <div class="ed-name">${esc(def.n)}</div>
+        <button class="tpl-btn x" data-edrmex="${e.ex}" aria-label="remove exercise">✕</button>
+      </div>
+      ${e.sets.map((x,i) => `<button class="ed-set" data-edset="${e.ex}:${i}">
+        <span class="ed-num">${i+1}</span>
+        <span class="ed-val">${setLabel(e.ex, x)}</span>
+        <span class="ed-go">Edit</span>
+      </button>`).join("") || `<div class="ed-empty">No sets yet.</div>`}
+      <div style="padding:10px 12px 12px">
+        <button class="btn btn-wide" data-edaddset="${e.ex}"
+          style="min-height:42px;font-size:13.5px">+ Add set</button>
+      </div>
+    </div>`;
+  }).join("");
+  return `<div class="ed-wrap">
+    ${blocks || `<div class="ed-empty">Nothing logged that day.</div>`}
+    <button class="btn btn-wide" data-edaddex="1" style="min-height:44px">+ Add exercise</button>
+  </div>`;
+}
+
+function openEditSession(date){
+  const sess = sessById(date);
+  if(!sess) return;
+  const n = sess.entries.reduce((a,e) => a + e.sets.length, 0);
+  sheet("Edit " + fmtDate(date), editSessionBody(sess),
+    `<div class="queue-hero">
+      <div class="kicker">${esc(sessName(sess))}</div>
+      <div class="line">${n} set${n===1?"":"s"} logged. Tap one to change the weight or reps.</div>
+    </div>`,
+    {dismissLabel:"Done", onDismiss(){ closeEditSession(date); }});
+  wireEditSession(date);
+}
+
+/* An entry with no sets left is clutter and an empty session is a ghost day on
+   the calendar. Prune both, but only on the way out - mid-edit they are the
+   scaffolding you are adding sets onto. */
+function closeEditSession(date){
+  const sess = sessById(date);
+  if(sess){
+    sess.entries = sess.entries.filter(e => e.sets.length);
+    if(!sess.entries.length){
+      S.sessions = S.sessions.filter(x => x !== sess);
+      if(ui.calDay === date) ui.calDay = null;
+    }
+    save();
+  }
+  closeSheet(); render();
+}
+
+function wireEditSession(date){
+  qq("[data-edset]").forEach(b => b.onclick = () => {
+    const p = b.dataset.edset.split(":");
+    openSetEditor(date, p[0], +p[1]);
+  });
+  qq("[data-edaddset]").forEach(b => b.onclick = () => openSetEditor(date, b.dataset.edaddset, -1));
+
+  qq("[data-edrmex]").forEach(b => b.onclick = () => {
+    const sess = sessById(date); if(!sess) return;
+    const id = b.dataset.edrmex;
+    const e = sess.entries.find(x => x.ex === id); if(!e) return;
+    askConfirm({
+      title:"Remove exercise",
+      kicker:(exById[id] || {n:id}).n + " · " + fmtDate(date),
+      line:e.sets.length + " set" + (e.sets.length===1?"":"s") + " will go with it.",
+      yes:"Remove", danger:true,
+      onYes(){
+        sess.entries = sess.entries.filter(x => x.ex !== id);
+        save(); openEditSession(date);
+      },
+      onNo(){ openEditSession(date); }
+    });
+  });
+
+  const add = document.querySelector("[data-edaddex]");
+  if(add) add.onclick = () => openCatalogue(id => {
+    const sess = sessById(date); if(!sess) return;
+    if(!sess.entries.some(e => e.ex === id)) sess.entries.push({ex:id, sets:[]});
+    save(); openSetEditor(date, id, -1);
+  }, "Add to " + fmtDate(date), {onDismiss(){ openEditSession(date); }});
+}
+
+/* idx -1 means a new set, prefilled from the last one on that exercise.
+   Own ids and own nudge attribute, so the logger's handlers cannot reach in. */
+function openSetEditor(date, exId, idx){
+  const sess = sessById(date); if(!sess) return;
+  let e = sess.entries.find(x => x.ex === exId);
+  if(!e){ e = {ex:exId, sets:[]}; sess.entries.push(e); }
+  const def = defFor(exId), time = isTime(exId);
+  const cur = idx >= 0 ? e.sets[idx] : (e.sets[e.sets.length-1] || null);
+  if(idx >= 0 && !cur) return;
+
+  const startT = cur && cur.t != null ? cur.t : 30;
+  const startW = cur ? cur.w : (def.bw ? 0 : 20);
+  const startR = cur ? cur.r : def.rl;
+  const back = () => openEditSession(date);
+
+  const controls = time ? `
+      <div class="step-group">
+        <div class="step-label">Minutes</div>
+        <div class="step-ctl">
+          <button data-ednudge="t:-" aria-label="fewer minutes">−</button>
+          <input id="edT" type="number" inputmode="numeric" step="5" value="${startT}">
+          <button data-ednudge="t:+" aria-label="more minutes">+</button>
+        </div>
+      </div>` : `
+      <div class="step-group">
+        <div class="step-label">Weight (${def.u})</div>
+        <div class="step-ctl">
+          <button data-ednudge="w:-" aria-label="less weight"
+            ${startW <= 0 ? 'class="atfloor"' : ""}>−</button>
+          <input id="edW" type="text" inputmode="decimal" autocomplete="off"
+            spellcheck="false" value="${w(startW)}">
+          <button data-ednudge="w:+" aria-label="more weight">+</button>
+        </div>
+      </div>
+      <div class="step-group">
+        <div class="step-label">Reps</div>
+        <div class="step-ctl">
+          <button data-ednudge="r:-" aria-label="fewer reps">−</button>
+          <input id="edR" type="number" inputmode="numeric" step="1" value="${startR}">
+          <button data-ednudge="r:+" aria-label="more reps">+</button>
+        </div>
+      </div>`;
+
+  const body = `<div style="padding:6px 16px 16px;display:flex;flex-direction:column;gap:11px">
+      <div class="stepper">${controls}</div>
+      <button class="btn btn-primary btn-wide" data-edsave="1" style="min-height:52px">
+        ${idx >= 0 ? "Save set" : "Add set"}</button>
+      ${idx >= 0 ? `<button class="btn btn-wide danger" data-eddel="1">Delete set</button>` : ""}
+      <button class="btn btn-wide" data-edback="1">Cancel</button>
+    </div>`;
+
+  /* exercise name alone in the title - at 375px the two together wrapped */
+  sheet((exById[exId] || {n:exId}).n, body,
+    `<div class="queue-hero">
+      <div class="kicker">${idx >= 0 ? "Set " + (idx+1) : "New set"} · ${esc(fmtDate(date))}</div>
+      <div class="line">${time ? "Logged in minutes."
+        : "Target " + def.rl + "–" + def.rh + " reps."}</div>
+    </div>`,
+    {dismissLabel:"Back", onDismiss:back});
+
+  qq("[data-ednudge]").forEach(b => b.onclick = () => {
+    const p = b.dataset.ednudge.split(":"), f = p[0], dir = p[1];
+    const el = document.getElementById(f === "w" ? "edW" : f === "r" ? "edR" : "edT");
+    const step = f === "w" ? def.inc : f === "t" ? 5 : 1;
+    let v = num(el.value) + (dir === "+" ? step : -step);
+    if(v < 0) v = 0;
+    v = Math.round(v*100)/100;
+    if(f === "w"){
+      el.value = w(v);
+      const minus = document.querySelector('[data-ednudge="w:-"]');
+      if(minus) minus.classList.toggle("atfloor", v <= 0);
+    } else {
+      el.value = v;
+    }
+  });
+
+  document.querySelector("[data-edback]").onclick = back;
+
+  document.querySelector("[data-edsave]").onclick = () => {
+    let val;
+    if(time){
+      const t = Math.round(num(document.getElementById("edT").value));
+      if(t <= 0) return;
+      val = {t};
+    } else {
+      const r = Math.round(num(document.getElementById("edR").value));
+      if(r <= 0) return;
+      val = {w:num(document.getElementById("edW").value), r};
+    }
+    if(idx >= 0) e.sets[idx] = val; else e.sets.push(val);
+    save(); openEditSession(date);
+  };
+
+  const del = document.querySelector("[data-eddel]");
+  if(del) del.onclick = () => { e.sets.splice(idx, 1); save(); openEditSession(date); };
 }
 
 /* full catalogue — used mid-session and from Setup */
@@ -1945,7 +2161,7 @@ function openCatalogue(onPick, title, opts){
         <small>search 1,292 names or type your own</small></div></div>
     </button>`;
 
-  sheet(title || "Pick an exercise", create + body);
+  sheet(title || "Pick an exercise", create + body, "", {onDismiss:o.onDismiss});
   document.querySelectorAll("[data-cat]").forEach(b => b.onclick = () => {
     closeSheet(); onPick(b.dataset.cat);
   });
@@ -2485,6 +2701,7 @@ function wire(){
     ui.histEx = b.dataset.hist || null; ui.tab = "history"; render();
   });
   q("[data-histsheet]").forEach(b => b.onclick = () => openHistorySheet(b.dataset.histsheet));
+  q("[data-editsess]").forEach(b => b.onclick = () => openEditSession(b.dataset.editsess));
   q("[data-swap]").forEach(b => b.onclick = () => openSwapSheet(b.dataset.swap));
   q("[data-muscle]").forEach(b => b.onclick = () => openMuscleSheet(b.dataset.muscle));
   q("[data-discard]").forEach(b => b.onclick = () => {
