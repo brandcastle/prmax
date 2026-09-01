@@ -422,6 +422,19 @@ button{font:inherit;color:inherit;cursor:pointer}
 .hist-edit{flex:0 0 auto;width:42px;min-height:42px;border:1px solid var(--line-strong);
   background:var(--surface);color:var(--muted);border-radius:9px;font-size:15px;cursor:pointer}
 .hist-edit:active{transform:scale(.9)}
+.pg-body{padding:2px 4px 4px}
+.pg-body .tpl-row{padding-left:8px}
+.day-open{flex:1;min-width:0;display:flex;align-items:center;gap:9px;padding:2px 0;
+  border:0;background:none;color:inherit;text-align:left;font:inherit;cursor:pointer}
+.day-open:active{opacity:.6}
+.day-key{flex:0 0 auto;width:26px;height:26px;border-radius:7px;display:flex;
+  align-items:center;justify-content:center;font-family:var(--f-disp);font-size:13px;
+  font-weight:700;background:var(--surface-2);color:var(--muted)}
+.day-key.U{background:var(--accent-soft);color:var(--accent)}
+.day-key.L{background:var(--ready-soft);color:var(--ready)}
+.day-key.A{background:var(--hold-soft);color:var(--hold)}
+.day-key.X{background:var(--stall-soft);color:var(--stall)}
+.day-key.C{background:var(--surface-2);color:var(--muted)}
 .ed-wrap{padding:6px 16px 16px;display:flex;flex-direction:column;gap:14px}
 .ed-block{border:1px solid var(--line);border-radius:11px;overflow:hidden}
 .ed-head{display:flex;align-items:center;gap:8px;padding:9px 10px 9px 12px;
@@ -493,7 +506,7 @@ textarea{width:100%;min-height:150px;font-family:var(--f-mono);font-size:12px;
    ====================================================================== */
 
 const KEY = "ironledger.v1";
-const BUILD = "2026.08.28.22";   /* keep in step with version.txt */
+const BUILD = "2026.08.29.24";   /* keep in step with version.txt */
 
 /* ---------------- exercise library ---------------- */
 const EX = [
@@ -534,6 +547,15 @@ const EX = [
   {id:"crunchw", n:"Weighted Crunch",        m:"abs",       u:"lb", rl:8,  rh:15, inc:5},
   {id:"crunchm", n:"Machine Crunch",         m:"abs",       u:"lb", rl:10, rh:15, inc:10},
   {id:"hlr",     n:"Hanging Leg Raise",      m:"abs", sec:["forearms"],       u:"lb", rl:10, rh:20, inc:5,   bw:true},
+  /* --- bodyweight: the catalogue was machine-heavy, and a calisthenics
+         block needs somewhere to start. Still load-tracked - a weight belt,
+         a backpack, or 0 for bodyweight. --- */
+  {id:"pushup",  n:"Push-Up",                m:"chest", sec:["triceps","frontdelt"],  u:"lb", rl:8,  rh:20, inc:5,  bw:true},
+  {id:"pikepu",  n:"Pike Push-Up",           m:"frontdelt", sec:["triceps"],          u:"lb", rl:6,  rh:15, inc:5,  bw:true},
+  {id:"chinup",  n:"Chin-Up",                m:"back", sec:["biceps","forearms"],     u:"lb", rl:5,  rh:12, inc:5,  bw:true},
+  {id:"invrow",  n:"Inverted Row",           m:"back", sec:["biceps","reardelt"],     u:"lb", rl:8,  rh:15, inc:5,  bw:true},
+  {id:"bwsquat", n:"Bodyweight Squat",       m:"quads", sec:["glutes","adductors"],   u:"lb", rl:12, rh:25, inc:5,  bw:true},
+  {id:"nordic",  n:"Nordic Curl",            m:"hamstrings", sec:["glutes"],          u:"lb", rl:4,  rh:10, inc:5,  bw:true},
   /* --- cardio: logged in minutes --- */
   {id:"walk",    n:"Walk",                m:"cardio", kind:"time", step:5, note:"active recovery"},
   {id:"incline", n:"Incline Treadmill",   m:"cardio", kind:"time", step:5},
@@ -598,7 +620,10 @@ function targetFor(id){
 muscleById.cardio = {id:"cardio", n:"Cardio"};
 
 /* day types — the tiles, and the templates behind them */
-const DAYS = [
+/* These six were the app's fixed vocabulary until programs landed. They are
+   now only the seed for a first program: a day is part of a split, and a new
+   training block can be a different split entirely. */
+const DEFAULT_DAYS = [
   {id:"upper",  n:"Upper",         key:"U"},
   {id:"lowerq", n:"Lower — Quad",  key:"L"},
   {id:"lowerg", n:"Lower — Glute", key:"L"},
@@ -606,7 +631,17 @@ const DAYS = [
   {id:"abs",    n:"Abs",           key:"X"},
   {id:"cardio", n:"Cardio",        key:"C"},
 ];
-const dayById = Object.fromEntries(DAYS.map(d => [d.id, d]));
+
+/* Every day from every program, live and retired. A session logged under a
+   block you have since moved on from still finds its name and its calendar
+   colour here, which is why programs are archived rather than deleted. */
+let dayById = {};
+function refreshDays(){
+  dayById = {};
+  (S.programs || []).forEach(p =>
+    (p.days || []).forEach(d => { if(!dayById[d.id]) dayById[d.id] = d; }));
+}
+const newId = p => p + "_" + Date.now().toString(36) + Math.random().toString(36).slice(2,5);
 
 function defaultTemplates(){
   return {
@@ -617,6 +652,59 @@ function defaultTemplates(){
     abs:   ["hlr","crunchw","crunchm","backext"],
     cardio:["walk","incline","bike","stairs"],
   };
+}
+
+/* Ready-made splits for a new block. Only ids that exist in EX - an empty day
+   in a starter would be worse than no starter at all. */
+const STARTERS = [
+  {n:"Push / Pull / Legs", days:[
+    {n:"Push",   key:"U", ex:["incdb","fly","dips","latdb","latcbl","pushdn","ohext"]},
+    {n:"Pull",   key:"U", ex:["pullup","prow","pulldn","facepull","rdfly","inccurl","hammer"]},
+    {n:"Legs",   key:"L", ex:["legpress","bssq","legext","rdl","legcurl","calf"]},
+  ]},
+  {n:"Upper / Lower", days:[
+    {n:"Upper",  key:"U", ex:["incdb","pullup","prow","fly","pulldn","latdb","facepull","pushdn","inccurl"]},
+    {n:"Lower",  key:"L", ex:["legpress","rdl","bssq","legcurl","legext","calf"]},
+  ]},
+  {n:"Full Body", days:[
+    {n:"Full Body A", key:"U", ex:["incdb","prow","legpress","latdb","inccurl","pushdn","calf"]},
+    {n:"Full Body B", key:"L", ex:["dips","pulldn","rdl","bssq","facepull","hammer","hlr"]},
+  ]},
+  {n:"Body Part", days:[
+    {n:"Chest",     key:"U", ex:["incdb","fly","dips"]},
+    {n:"Back",      key:"U", ex:["pullup","prow","pulldn","mrow"]},
+    {n:"Shoulders", key:"U", ex:["latdb","latcbl","facepull","rdfly"]},
+    {n:"Arms",      key:"A", ex:["inccurl","cblcurl","hammer","pushdn","ohext","skull"]},
+    {n:"Legs",      key:"L", ex:["legpress","bssq","legext","rdl","legcurl","calf"]},
+  ]},
+  {n:"Calisthenics", days:[
+    {n:"Push", key:"U", ex:["pushup","dips","pikepu"]},
+    {n:"Pull", key:"U", ex:["pullup","chinup","invrow","hlr"]},
+    {n:"Legs", key:"L", ex:["bwsquat","lunge","nordic","bssq","calf"]},
+  ]},
+];
+
+/* One-way migration into programs. d.templates is deliberately left on disk
+   untouched - it costs a few hundred bytes and it is the only copy of the old
+   shape if this ever needs unpicking. Day ids are preserved, so every session
+   already logged keeps resolving with no data change at all.
+   Runs before todayISO() exists, so dates come from the log, never the clock. */
+function migratePrograms(d){
+  if(d.programs && d.programs.length){
+    if(!d.activeProgram) d.activeProgram = d.programs[0].id;
+    return d;
+  }
+  const tpl = d.templates || defaultTemplates();
+  const dates = (d.sessions || []).map(x => x.date).filter(Boolean).sort();
+  d.programs = [{
+    id: "pg_1",
+    n: "My Split",
+    days: DEFAULT_DAYS.map(x => ({id:x.id, n:x.n, key:x.key, ex:(tpl[x.id] || []).slice()})),
+    started: dates[0] || null,
+    ended: null,
+  }];
+  d.activeProgram = "pg_1";
+  return d;
 }
 
 /* ---------------- state ---------------- */
@@ -631,9 +719,10 @@ function registerCustom(){
   });
 }
 registerCustom();
+refreshDays();
 let ui = {tab:"today", openEx:null, histEx:null,
           logMode:"cal", calMonth:null, calDay:null,
-          tplDay:"upper", freshSet:false, activeSession:null, showSecrets:false};
+          freshSet:false, activeSession:null, showSecrets:false};
 
 function load(){
   let d = null;
@@ -647,6 +736,7 @@ function load(){
     x && x.entries && x.entries.some(e => e.sets && e.sets.length));
   d.pruned = before !== d.sessions.length;
   if(!d.templates) d.templates = defaultTemplates();
+  migratePrograms(d);
   if(!d.targets) d.targets = defaultTargets();
   if(!d.exGoals) d.exGoals = {};
   if(!d.customEx) d.customEx = [];
@@ -659,6 +749,7 @@ function load(){
 let lastSaveOk = null;
 function save(){
   try{
+    refreshDays();          /* programs change through a dozen paths; this is the one choke point */
     S.savedAt = Date.now();
     localStorage.setItem(KEY, JSON.stringify(S));
     lastSaveOk = true;
@@ -802,6 +893,77 @@ function storedSessions(){
 }
 
 /* ---------------- helpers ---------------- */
+/* ---------------- programs ----------------
+   A program is a training block: a split, its exercise lists, and the dates it
+   ran. Nothing about progression, volume or history keys off it - those all key
+   off the exercise, so starting a new block never resets your numbers. */
+function activeProgram(){
+  const list = S.programs || [];
+  return list.find(x => x.id === S.activeProgram) || list[0] || null;
+}
+const activeDays = () => { const p = activeProgram(); return (p && p.days) || []; };
+const dayEx = id => { const d = dayById[id]; return (d && d.ex) || []; };
+
+/* A block cannot be deleted once anything has been logged under it, because
+   its days carry the names and colours those sessions display. */
+function programUsed(p){
+  const ids = {};
+  (p.days || []).forEach(d => ids[d.id] = 1);
+  return S.sessions.some(x => (x.pg && x.pg === p.id) || (x.day && ids[x.day]));
+}
+
+function setActiveProgram(id){
+  const prev = activeProgram();
+  const next = (S.programs || []).find(x => x.id === id);
+  if(!next) return;
+  if(prev && prev.id !== next.id && !prev.ended) prev.ended = todayISO();
+  next.ended = null;
+  if(!next.started) next.started = todayISO();
+  S.activeProgram = next.id;
+  save(); render();
+}
+
+/* The five calendar colours a day can wear. Names are the colour, not the
+   body part, because a day called "Push" has no business being "Upper". */
+const DAY_KEYS = [
+  {k:"U", n:"Green"}, {k:"L", n:"Blue"}, {k:"A", n:"Amber"},
+  {k:"X", n:"Red"},   {k:"C", n:"Grey"},
+];
+
+/* A day cannot be removed once a session points at it - dayById is built from
+   p.days, so removing it would strip that session's name and colour. */
+const dayUsed = id => S.sessions.some(x => x.day === id);
+const programOf = dayId =>
+  (S.programs || []).find(p => (p.days || []).some(d => d.id === dayId)) || null;
+
+function makeProgram(name, days){
+  const p = {
+    id: newId("pg"),
+    n: name,
+    days: days.map(d => ({id:newId("d"), n:d.n, key:d.key || "U", ex:(d.ex || []).slice()})),
+    started: todayISO(),
+    ended: null,
+  };
+  S.programs.push(p);
+  setActiveProgram(p.id);
+  return p;
+}
+
+/* New days get new ids on purpose: sessions from the old block keep pointing at
+   the old block's days, so its history stays labelled after you move on. */
+function duplicateProgram(srcId, name){
+  const src = (S.programs || []).find(x => x.id === srcId);
+  if(!src) return;
+  S.programs.push({
+    id: newId("pg"),
+    n: name,
+    days: src.days.map(d => ({id:newId("d"), n:d.n, key:d.key, ex:(d.ex || []).slice()})),
+    started: todayISO(),
+    ended: null,
+  });
+  setActiveProgram(S.programs[S.programs.length-1].id);
+}
+
 /* the phone's own calendar day. toISOString() is UTC and rolls over at 8pm here,
    which filed evening sessions under tomorrow. */
 const todayISO = () => {
@@ -1255,12 +1417,18 @@ function viewToday(){
         <div class="hello">Hey ${esc(S.name)},<br><em>what are we working on today?</em></div>
         ${last ? `<div class="hello-sub">Last up was ${esc(sessName(last))}, ${daysAgo(last.date)} day${daysAgo(last.date)===1?"":"s"} ago.</div>` : ""}
       </div>
-      <div class="tiles">
-        ${DAYS.map(d => `<button class="tile" data-day="${d.id}">
+      ${activeDays().length ? `<div class="tiles">
+        ${activeDays().map(d => `<button class="tile" data-day="${d.id}">
             <b>${esc(d.n)}</b>
-            <small>${(S.templates[d.id]||[]).length} exercises</small>
+            <small>${dayEx(d.id).length} exercises</small>
           </button>`).join("")}
-      </div>`;
+      </div>` : `<div class="card pad">
+        <div class="note" style="font-size:14px;line-height:1.5">
+          <b>${esc((activeProgram() || {n:"This program"}).n)}</b> has no days yet.
+          Add one in Setup, or pick any exercise below to log without a day.</div>
+      </div>
+      <div class="tiles"><button class="tile wide add" data-openall="1">
+        <b>+ Something else</b><small>full catalogue</small></button></div>`}`;
   }
 
   /* 2. an exercise is open — grid hidden, logger only */
@@ -1272,7 +1440,7 @@ function viewToday(){
 
   /* 3. between exercises — the day's grid */
   const doneIds = s.entries.filter(e => e.sets.length).map(e => e.ex);
-  const plan = (s.plan && s.plan.length ? s.plan : (S.templates[s.day] || []))
+  const plan = (s.plan && s.plan.length ? s.plan : dayEx(s.day))
                  .filter(id => exById[id]);
   const extras = doneIds.filter(id => !plan.includes(id));
   const total = s.entries.reduce((a,e) => a + e.sets.length, 0);
@@ -1298,7 +1466,7 @@ function viewToday(){
        <div class="card pad" style="display:flex;flex-direction:column;gap:9px">
          <div class="note" style="font-size:14px">What kind of day is this? Nothing is labelled until you say.</div>
          <div class="seg">
-           ${DAYS.map(d => `<button data-setday="${d.id}">${esc(d.n)}</button>`).join("")}
+           ${activeDays().map(d => `<button data-setday="${d.id}">${esc(d.n)}</button>`).join("")}
          </div>
        </div>`;
 
@@ -1499,13 +1667,29 @@ function calendarView(){
         ${["S","M","T","W","T","F","S"].map(d => `<div class="cal-dow">${d}</div>`).join("")}
         ${cells}
       </div>
-      <div class="cal-key">
-        <span class="U">U · Upper</span><span class="L">L · Lower</span>
-        <span class="A">A · Arms</span><span class="X">AB · Abs</span><span class="C">C · Cardio</span>
-      </div>
+      <div class="cal-key">${legendKeys(ym)}</div>
     </div>
     <div class="eyebrow">${count} session${count===1?"":"s"} this month</div>
     ${sel ? sessionCard(sel) : `<div class="card pad"><div class="note" style="color:var(--muted)">Tap a day to see what you did.</div></div>`}`;
+}
+
+/* The legend used to be five hardcoded labels, which stopped being true the
+   moment a day could be renamed. Built from the days actually on screen. */
+function legendKeys(ym){
+  const seen = {};
+  const add = (key, n) => {
+    const list = seen[key] = seen[key] || [];
+    if(!list.includes(n)) list.push(n);
+  };
+  /* what is actually on the grid this month */
+  S.sessions.filter(x => monthOf(x.date) === ym).forEach(x => {
+    const d = dayById[x.day];
+    add(d ? d.key : dayKey(x), d ? d.n : (sessName(x) || "Unlabelled"));
+  });
+  /* then what you could log next, for keys the month has not used */
+  activeDays().forEach(d => { if(!seen[d.key]) add(d.key, d.n); });
+  return DAY_KEYS.filter(k => seen[k.k]).map(k =>
+    `<span class="${k.k}">${esc(k.k + " · " + seen[k.k].slice(0,2).join(", "))}</span>`).join("");
 }
 
 function sessionCard(x){
@@ -1552,26 +1736,30 @@ function listView(){
 
 /* ---------- SETUP ---------- */
 function viewSetup(){
-  const day = ui.tplDay, list = S.templates[day] || [];
+  const pg = activeProgram();
+  const past = (S.programs || []).filter(p => p.id !== S.activeProgram);
+  const pgRow = p => `<button class="pick" data-pgopen="${p.id}">
+      <div class="pick-row">
+        <div style="min-width:0"><b>${esc(p.n)}</b>
+          <small>${p.days.length} day${p.days.length===1?"":"s"}${programMeta(p)}</small></div>
+        <div class="pick-last">›</div>
+      </div></button>`;
   return `
-    <div class="eyebrow">My training days</div>
-    <div class="card pad" style="display:flex;flex-direction:column;gap:10px">
-      <div class="seg">
-        ${DAYS.map(d => `<button data-tpl="${d.id}" class="${day===d.id?"on":""}">${esc(d.n)}</button>`).join("")}
+    <div class="eyebrow">Current program</div>
+    <div class="card">
+      ${pg ? pgRow(pg) : '<div class="pad note" style="color:var(--muted)">No program yet.</div>'}
+      <div style="padding:12px">
+        <button class="btn btn-wide" id="newPg" style="min-height:44px;font-size:14px">
+          + New program</button>
       </div>
     </div>
-    <div class="card">
-      ${list.map((id,i) => {
-        const def = exById[id]; if(!def) return "";
-        return `<div class="tpl-row">
-          <div class="tpl-name">${esc(def.n)}<small>${esc(muscleById[def.m].n)}</small></div>
-          <button class="tpl-btn" data-tplmove="${i}:-1" aria-label="move up" ${i===0?"disabled style=opacity:.3":""}>▲</button>
-          <button class="tpl-btn" data-tplmove="${i}:1" aria-label="move down" ${i===list.length-1?"disabled style=opacity:.3":""}>▼</button>
-          <button class="tpl-btn x" data-tpldel="${i}" aria-label="remove">✕</button>
-        </div>`;
-      }).join("") || '<div class="pad note" style="color:var(--muted)">Nothing here yet.</div>'}
-      <div style="padding:12px 12px 14px">
-        <button class="btn btn-wide" data-tpladd="1">+ Add exercise to ${esc(dayById[day].n)}</button>
+    ${past.length ? `<div class="eyebrow">Past blocks</div>
+    <div class="card">${past.map(pgRow).join("")}</div>` : ""}
+    <div class="card pad">
+      <div class="note" style="font-size:13px;color:var(--muted);line-height:1.5">
+        A program is a training block — a split and the exercises in each day. Tap it to edit
+        its days. Switching blocks never touches a set you have logged, and your progression
+        carries across, because that follows the exercise.
       </div>
     </div>
 
@@ -1820,6 +2008,249 @@ function notice(title, line){
   document.querySelector("[data-no]").onclick = closeSheet;
 }
 
+/* ---------- PROGRAMS ---------- */
+function programMeta(p){
+  if(p.id === S.activeProgram) return p.started ? " · since " + fmtDate(p.started) : "";
+  if(p.started && p.ended)     return " · " + fmtDate(p.started) + " – " + fmtDate(p.ended);
+  if(p.ended)                  return " · ended " + fmtDate(p.ended);
+  return " · not run yet";
+}
+
+/* The program sheet IS the day list - tap a program, see the days you made. */
+function openProgramSheet(pgId){
+  const p = (S.programs || []).find(x => x.id === pgId);
+  if(!p) return;
+  const active = p.id === S.activeProgram;
+  const used = programUsed(p);
+  const last = (S.programs || []).length < 2;
+
+  const rows = p.days.map((d,i) => `<div class="tpl-row">
+      <button class="day-open" data-dayopen="${d.id}">
+        <span class="day-key ${d.key}">${esc(d.key)}</span>
+        <span class="tpl-name">${esc(d.n)}<small>${(d.ex || []).length} exercise${(d.ex||[]).length===1?"":"s"}</small></span>
+      </button>
+      <button class="tpl-btn" data-daymove="${i}:-1" aria-label="move up" ${i===0?"disabled style=opacity:.3":""}>▲</button>
+      <button class="tpl-btn" data-daymove="${i}:1" aria-label="move down" ${i===p.days.length-1?"disabled style=opacity:.3":""}>▼</button>
+    </div>`).join("") || '<div class="pad note" style="color:var(--muted)">No days yet. Add one below.</div>';
+
+  const body = `<div class="pg-body">
+      ${rows}
+      <div style="padding:12px 12px 4px">
+        <button class="btn btn-wide" data-dayadd="1" style="min-height:44px">+ Add a day</button>
+      </div>
+      <div style="padding:8px 12px 16px;display:flex;flex-direction:column;gap:10px">
+        ${active ? "" : `<button class="btn btn-primary btn-wide" data-pgon="1"
+          style="min-height:48px">Make this the current program</button>`}
+        <button class="btn btn-wide" data-pgdup="1">Start a new program from this</button>
+        <button class="btn btn-wide" data-pgname="1">Rename program</button>
+        ${used || last
+          ? `<div class="note" style="font-size:12.5px;color:var(--faint);line-height:1.5">
+               ${last ? "This is your only program, so it stays."
+                      : "Sessions are logged under this program, so it stays — deleting it would strip the day names and calendar colours off them."}</div>`
+          : `<button class="btn btn-wide danger" data-pgdel="1">Delete this program</button>`}
+      </div>
+    </div>`;
+
+  sheet(p.n, body, `<div class="queue-hero">
+      <div class="kicker">${p.days.length} day${p.days.length===1?"":"s"}${active ? " · current" : ""}</div>
+      <div class="line">${active
+        ? "These are the days you can start from the Train tab."
+        : "Not the current program. Its logged sessions keep their labels either way."}</div>
+    </div>`);
+
+  const back = () => openProgramSheet(p.id);
+
+  document.querySelectorAll("[data-dayopen]").forEach(b =>
+    b.onclick = () => openDaySheet(p.id, b.dataset.dayopen));
+
+  document.querySelectorAll("[data-daymove]").forEach(b => b.onclick = () => {
+    const [i, dir] = b.dataset.daymove.split(":").map(Number);
+    const j = i + dir;
+    if(j < 0 || j >= p.days.length) return;
+    [p.days[i], p.days[j]] = [p.days[j], p.days[i]];
+    save(); back();
+  });
+
+  document.querySelector("[data-dayadd]").onclick = () => askText({
+    title:"New day", line:"What do you call it? Push, Legs, Chest and Back — whatever you use.",
+    value:"", placeholder:"Day name", yes:"Add day",
+    onYes(v){
+      p.days.push({id:newId("d"), n:v, key:"U", ex:[]});
+      save(); openDaySheet(p.id, p.days[p.days.length-1].id);
+    },
+    onNo:back,
+  });
+
+  const on = document.querySelector("[data-pgon]");
+  if(on) on.onclick = () => { closeSheet(); setActiveProgram(p.id); };
+
+  document.querySelector("[data-pgdup]").onclick = () => askText({
+    title:"New program", line:"Copies " + p.n + "'s days and exercise lists, then makes it current.",
+    value:p.n + " 2", yes:"Create program",
+    onYes(v){ duplicateProgram(p.id, v); },
+    onNo:back,
+  });
+
+  document.querySelector("[data-pgname]").onclick = () => askText({
+    title:"Rename program", value:p.n, yes:"Save name",
+    onYes(v){ p.n = v; save(); render(); openProgramSheet(p.id); },
+    onNo:back,
+  });
+
+  const del = document.querySelector("[data-pgdel]");
+  if(del) del.onclick = () => askConfirm({
+    title:"Delete program", kicker:p.n,
+    line:"Nothing has been logged under it, so nothing is lost.",
+    yes:"Delete it", danger:true,
+    onYes(){
+      S.programs = S.programs.filter(x => x.id !== p.id);
+      if(S.activeProgram === p.id){ setActiveProgram(S.programs[0].id); return; }
+      save(); render();
+    },
+    onNo:back,
+  });
+}
+
+/* One day: its name, its calendar colour, and its exercise list. */
+function openDaySheet(pgId, dayId){
+  const p = (S.programs || []).find(x => x.id === pgId);
+  const d = p && p.days.find(x => x.id === dayId);
+  if(!d) return;
+  const list = d.ex || (d.ex = []);
+  const used = dayUsed(d.id);
+  const back = () => openDaySheet(pgId, dayId);
+
+  const body = `<div class="pg-body">
+      <div style="padding:10px 12px 4px">
+        <div class="step-label" style="padding-bottom:7px">Calendar colour</div>
+        <div class="seg">${DAY_KEYS.map(k =>
+          `<button data-daykey="${k.k}" class="${d.key===k.k?"on":""}">${esc(k.n)}</button>`).join("")}</div>
+      </div>
+      ${list.map((id,i) => {
+        const def = exById[id]; if(!def) return "";
+        return `<div class="tpl-row">
+          <div class="tpl-name">${esc(def.n)}<small>${esc(muscleById[def.m].n)}</small></div>
+          <button class="tpl-btn" data-exmove="${i}:-1" aria-label="move up" ${i===0?"disabled style=opacity:.3":""}>▲</button>
+          <button class="tpl-btn" data-exmove="${i}:1" aria-label="move down" ${i===list.length-1?"disabled style=opacity:.3":""}>▼</button>
+          <button class="tpl-btn x" data-exdel="${i}" aria-label="remove">✕</button>
+        </div>`;
+      }).join("") || '<div class="pad note" style="color:var(--muted)">No exercises in this day yet.</div>'}
+      <div style="padding:12px 12px 4px">
+        <button class="btn btn-wide" data-exadd="1" style="min-height:44px">+ Add exercise</button>
+      </div>
+      <div style="padding:8px 12px 16px;display:flex;flex-direction:column;gap:10px">
+        <button class="btn btn-wide" data-dayname="1">Rename day</button>
+        ${used || p.days.length < 2
+          ? `<div class="note" style="font-size:12.5px;color:var(--faint);line-height:1.5">
+               ${p.days.length < 2 ? "A program needs at least one day."
+                 : "Sessions are logged as " + esc(d.n) + ", so it stays — removing it would strip their name and colour."}</div>`
+          : `<button class="btn btn-wide danger" data-dayrm="1">Remove this day</button>`}
+      </div>
+    </div>`;
+
+  /* one level down from the program, so the dismiss goes back rather than out */
+  sheet(d.n, body, `<div class="queue-hero">
+      <div class="kicker">${esc(p.n)}</div>
+      <div class="line">${list.length} exercise${list.length===1?"":"s"}${used ? " · logged" : ""}</div>
+    </div>`, {dismissLabel:"Back", onDismiss(){ openProgramSheet(pgId); }});
+
+  document.querySelectorAll("[data-daykey]").forEach(b => b.onclick = () => {
+    d.key = b.dataset.daykey; save(); back();
+  });
+  document.querySelectorAll("[data-exmove]").forEach(b => b.onclick = () => {
+    const [i, dir] = b.dataset.exmove.split(":").map(Number);
+    const j = i + dir;
+    if(j < 0 || j >= list.length) return;
+    [list[i], list[j]] = [list[j], list[i]];
+    save(); back();
+  });
+  document.querySelectorAll("[data-exdel]").forEach(b => b.onclick = () => {
+    list.splice(+b.dataset.exdel, 1); save(); back();
+  });
+  document.querySelector("[data-exadd]").onclick = () => openCatalogue(id => {
+    if(!list.includes(id)) list.push(id);
+    save(); back();
+  }, "Add to " + d.n, {onDismiss:back});
+
+  document.querySelector("[data-dayname]").onclick = () => askText({
+    title:"Rename day", value:d.n, yes:"Save name",
+    onYes(v){
+      d.n = v;
+      /* sessions snapshot the name at the time, so old ones keep what they said */
+      save(); back();
+    },
+    onNo:back,
+  });
+
+  const rm = document.querySelector("[data-dayrm]");
+  if(rm) rm.onclick = () => askConfirm({
+    title:"Remove day", kicker:d.n + " · " + p.n,
+    line:"Nothing has been logged as this day, so nothing is lost.",
+    yes:"Remove it", danger:true,
+    onYes(){
+      p.days = p.days.filter(x => x.id !== d.id);
+      save(); openProgramSheet(pgId);
+    },
+    onNo:back,
+  });
+}
+
+/* Copy what you run now, take a ready-made split, or name your own days. */
+function openNewProgramSheet(){
+  const cur = activeProgram();
+  const body = `<div class="pg-body">
+      ${cur ? `<button class="pick" data-newfrom="copy">
+        <div class="pick-row"><div style="min-width:0"><b>Copy ${esc(cur.n)}</b>
+          <small>same days and exercises, yours to retailor</small></div></div></button>` : ""}
+      ${STARTERS.map((t,i) => `<button class="pick" data-newfrom="${i}">
+        <div class="pick-row"><div style="min-width:0"><b>${esc(t.n)}</b>
+          <small>${esc(t.days.map(d => d.n).join(" · "))}</small></div></div></button>`).join("")}
+      <button class="pick" data-newfrom="empty">
+        <div class="pick-row"><div style="min-width:0"><b>Start empty</b>
+          <small>name every day yourself</small></div></div></button>
+    </div>`;
+  sheet("New program", body, `<div class="queue-hero">
+      <div class="line">Whatever you pick, you can rename and reshape every day afterwards.</div>
+    </div>`);
+
+  document.querySelectorAll("[data-newfrom]").forEach(b => b.onclick = () => {
+    const from = b.dataset.newfrom;
+    const t = from === "copy"  ? {n:cur.n + " 2", days:cur.days}
+            : from === "empty" ? {n:"", days:[]}
+            : STARTERS[+from];
+    askText({
+      title:"Name it", value:t.n, placeholder:"Program name", yes:"Create program",
+      line:t.days.length
+        ? t.days.length + " day" + (t.days.length===1?"":"s") + ": " + t.days.map(d => d.n).join(", ")
+        : "You will add the days next.",
+      onYes(v){ makeProgram(v, t.days); },
+      onNo(){ openNewProgramSheet(); },
+    });
+  });
+}
+
+/* a one-field sheet - window.prompt is refused in sandboxed frames too */
+function askText(o){
+  const body = `<div style="padding:6px 16px 16px;display:flex;flex-direction:column;gap:11px">
+      <input class="txt" id="askTextIn" type="text" autocomplete="off" spellcheck="false"
+        maxlength="${o.max || 40}" value="${esc(o.value || "")}"
+        placeholder="${esc(o.placeholder || "")}">
+      <button class="btn btn-primary btn-wide" data-asksave="1"
+        style="min-height:50px">${esc(o.yes || "Save")}</button>
+      <button class="btn btn-wide" data-askno="1">Cancel</button>
+    </div>`;
+  const back = () => { closeSheet(); if(o.onNo) o.onNo(); };
+  sheet(o.title, body, o.line
+    ? `<div class="queue-hero"><div class="line">${esc(o.line)}</div></div>` : "",
+    {onDismiss:back});
+  const el = document.getElementById("askTextIn");
+  const go = () => { const v = el.value.trim(); if(!v) return; closeSheet(); o.onYes(v); };
+  document.querySelector("[data-asksave]").onclick = go;
+  document.querySelector("[data-askno]").onclick = back;
+  el.onkeydown = ev => { if(ev.key === "Enter"){ ev.preventDefault(); go(); } };
+  el.focus(); el.select();
+}
+
 /* ---------- EDIT A PAST SESSION ----------
    Deliberately not the logger: no ui.activeSession, no rest timer, no
    progression hints. A session you are fixing can never quietly absorb
@@ -2027,7 +2458,7 @@ function swapExercise(fromId, toId){
   if(!s || !from || !to || fromId === toId) return;
 
   /* copy the template down onto the session before editing it */
-  if(!s.plan || !s.plan.length) s.plan = (S.templates[s.day] || []).slice();
+  if(!s.plan || !s.plan.length) s.plan = dayEx(s.day).slice();
   const i = s.plan.indexOf(fromId);
   if(s.plan.includes(toId)){
     if(i > -1) s.plan.splice(i, 1);        /* already on the list - just drop the original */
@@ -2563,13 +2994,15 @@ function openConfirmSheet(exId){
 /* choose (or change) the day type — reuses today's session, never stacks a second one */
 function startDay(dayId){
   const d = dayById[dayId];
+  if(!d) return;
+  const pg = (activeProgram() || {}).id || null;
   let s = workingSession();
   if(!s){
-    S.sessions.push({date:todayISO(), day:d.id, name:d.n,
-                     plan:[...(S.templates[d.id] || [])], entries:[]});
+    S.sessions.push({date:todayISO(), day:d.id, name:d.n, pg,
+                     plan:dayEx(d.id).slice(), entries:[]});
   } else {
-    s.day = d.id; s.name = d.n;
-    const tpl = S.templates[d.id] || [];
+    s.day = d.id; s.name = d.n; s.pg = pg;
+    const tpl = dayEx(d.id);
     s.plan = [...tpl, ...s.entries.filter(e => e.sets.length && !tpl.includes(e.ex)).map(e => e.ex)];
   }
   ui.activeSession = currentSession();
@@ -2751,22 +3184,10 @@ function wire(){
     ui.calDay = ui.calDay === b.dataset.calday ? null : b.dataset.calday; render();
   });
 
-  /* --- setup: templates --- */
-  q("[data-tpl]").forEach(b => b.onclick = () => { ui.tplDay = b.dataset.tpl; render(); });
-  q("[data-tplmove]").forEach(b => b.onclick = () => {
-    const [i, dir] = b.dataset.tplmove.split(":").map(Number);
-    const list = S.templates[ui.tplDay], j = i + dir;
-    if(j < 0 || j >= list.length) return;
-    [list[i], list[j]] = [list[j], list[i]];
-    save(); render();
-  });
-  q("[data-tpldel]").forEach(b => b.onclick = () => {
-    S.templates[ui.tplDay].splice(+b.dataset.tpldel, 1); save(); render();
-  });
-  q("[data-tpladd]").forEach(b => b.onclick = () => openCatalogue(id => {
-    if(!S.templates[ui.tplDay].includes(id)) S.templates[ui.tplDay].push(id);
-    save(); render();
-  }, "Add to " + dayById[ui.tplDay].n));
+  /* --- setup: programs --- */
+  q("[data-pgopen]").forEach(b => b.onclick = () => openProgramSheet(b.dataset.pgopen));
+  const np = document.getElementById("newPg");
+  if(np) np.onclick = openNewProgramSheet;
 
   const flash = id => {
     const el = document.getElementById(id);
@@ -2807,8 +3228,9 @@ function wire(){
           S.customEx = S.customEx.filter(x => x.id !== id);
           const i = EX.findIndex(x => x.id === id); if(i > -1) EX.splice(i,1);
           delete exById[id];
-          Object.keys(S.templates).forEach(k =>
-            S.templates[k] = S.templates[k].filter(x => x !== id));
+          (S.programs || []).forEach(p => (p.days || []).forEach(dy => {
+            dy.ex = (dy.ex || []).filter(x => x !== id);
+          }));
         }
         save(); render();
       }
@@ -2953,6 +3375,7 @@ function wire(){
         const keep = syncCfg();                    /* this device's own credentials */
         S = d;
         if(!S.templates) S.templates = defaultTemplates();
+        migratePrograms(S);
         if(!S.name) S.name = "there";
         S.sync = Object.assign({url:"",token:"",synced:{},lastOk:null,lastErr:null},
                                S.sync || {}, {url:keep.url, token:keep.token});
