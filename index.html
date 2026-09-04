@@ -422,6 +422,43 @@ button{font:inherit;color:inherit;cursor:pointer}
 .hist-edit{flex:0 0 auto;width:42px;min-height:42px;border:1px solid var(--line-strong);
   background:var(--surface);color:var(--muted);border-radius:9px;font-size:15px;cursor:pointer}
 .hist-edit:active{transform:scale(.9)}
+
+/* effort picker - ten ascending bars, tap to rate */
+.eff{display:flex;flex-direction:column;gap:9px}
+.eff-lab{font-family:var(--f-mono);font-size:11px;font-weight:600;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--muted)}
+.eff-bars{display:flex;align-items:flex-end;gap:3px;height:60px}
+.eff-bar{flex:1;min-width:0;height:100%;display:flex;align-items:flex-end;justify-content:center;
+  border:0;background:none;padding:0;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.eff-bar span{display:block;width:100%;border-radius:4px 4px 3px 3px;
+  background:var(--surface-2);transition:transform .08s,background .08s}
+.eff-bar:active span{transform:scaleY(1.1)}
+.eff-bar.band0 span{background:var(--ready-soft)}
+.eff-bar.band1 span{background:var(--accent-soft)}
+.eff-bar.band2 span{background:var(--hold-soft)}
+.eff-bar.band3 span{background:var(--stall-soft)}
+/* the one you picked goes solid, the way the reference does it */
+.eff-bar.band0.on span{background:var(--ready)}
+.eff-bar.band1.on span{background:var(--accent)}
+.eff-bar.band2.on span{background:var(--hold)}
+.eff-bar.band3.on span{background:var(--stall)}
+.eff-read{display:flex;align-items:center;gap:9px;min-height:28px}
+.eff-num{flex:0 0 auto;width:28px;height:28px;border-radius:50%;display:flex;
+  align-items:center;justify-content:center;font-family:var(--f-disp);font-size:15px;
+  font-weight:700;background:var(--surface-2);color:var(--muted)}
+.eff-num.band0{background:var(--ready-soft);color:var(--ready)}
+.eff-num.band1{background:var(--accent-soft);color:var(--accent)}
+.eff-num.band2{background:var(--hold-soft);color:var(--hold)}
+.eff-num.band3{background:var(--stall-soft);color:var(--stall)}
+.eff-word{font-size:15px;font-weight:600}
+.eff-hint{font-weight:400;font-size:13px;color:var(--muted)}
+.eff-chip{display:inline-block;font-family:var(--f-mono);font-size:10px;font-weight:600;
+  padding:1px 5px;border-radius:5px;background:var(--surface-2);color:var(--muted);
+  white-space:nowrap;vertical-align:1px}
+.eff-chip.band0{background:var(--ready-soft);color:var(--ready)}
+.eff-chip.band1{background:var(--accent-soft);color:var(--accent)}
+.eff-chip.band2{background:var(--hold-soft);color:var(--hold)}
+.eff-chip.band3{background:var(--stall-soft);color:var(--stall)}
 .pg-body{padding:2px 4px 4px}
 .pg-body .tpl-row{padding-left:8px}
 .day-open{flex:1;min-width:0;display:flex;align-items:center;gap:9px;padding:2px 0;
@@ -506,7 +543,7 @@ textarea{width:100%;min-height:150px;font-family:var(--f-mono);font-size:12px;
    ====================================================================== */
 
 const KEY = "ironledger.v1";
-const BUILD = "2026.08.29.24";   /* keep in step with version.txt */
+const BUILD = "2026.09.03.25";   /* keep in step with version.txt */
 
 /* ---------------- exercise library ---------------- */
 const EX = [
@@ -961,7 +998,9 @@ function duplicateProgram(srcId, name){
     started: todayISO(),
     ended: null,
   });
-  setActiveProgram(S.programs[S.programs.length-1].id);
+  const made = S.programs[S.programs.length-1];
+  setActiveProgram(made.id);
+  return made;
 }
 
 /* the phone's own calendar day. toISOString() is UTC and rolls over at 8pm here,
@@ -1053,8 +1092,43 @@ function shiftMonth(ym, by){
 function exHistory(exId){
   return sorted().map(s => {
     const e = s.entries.find(x => x.ex === exId);
-    return e && e.sets.length ? {date:s.date, sets:e.sets} : null;
+    return e && e.sets.length ? {date:s.date, sets:e.sets, effort:e.effort} : null;
   }).filter(Boolean);
+}
+
+/* ---------- EFFORT ----------
+   One 1-10 rating per exercise, not per set. Reps-in-reserve was the other
+   candidate and it loses on cardio - "reps left" means nothing on a
+   Stairmaster - so a single scale covers both. No hidden second scale: every
+   rule below needs a monotonic number, none of them needs it in reps. */
+const EFFORT_BANDS = [
+  {lo:1, hi:3,  n:"Easy"},
+  {lo:4, hi:6,  n:"Moderate"},
+  {lo:7, hi:8,  n:"Hard"},
+  {lo:9, hi:10, n:"All Out"},
+];
+const effortBand = v => EFFORT_BANDS.findIndex(b => v >= b.lo && v <= b.hi);
+const effortName = v => (EFFORT_BANDS[effortBand(v)] || {n:""}).n;
+const effortChip = v => v
+  ? ` <span class="eff-chip band${effortBand(v)}">${v} ${esc(effortName(v))}</span>` : "";
+
+function effortPickerHTML(cur, label){
+  return `<div class="eff">
+      ${label ? `<div class="eff-lab">${esc(label)}</div>` : ""}
+      <div class="eff-bars">
+        ${[1,2,3,4,5,6,7,8,9,10].map(v => `<button class="eff-bar band${effortBand(v)}${cur===v?" on":""}"
+          data-eff="${v}" aria-label="${v} out of 10, ${esc(effortName(v))}"
+          ><span style="height:${Math.round(12 + v*4.8)}px"></span></button>`).join("")}
+      </div>
+      <div class="eff-read">${cur
+        ? `<span class="eff-num band${effortBand(cur)}">${cur}</span>
+           <span class="eff-word">${esc(effortName(cur))}</span>`
+        : `<span class="eff-word eff-hint">Tap to rate</span>`}</div>
+    </div>`;
+}
+function wireEffortPicker(onPick){
+  document.querySelectorAll("[data-eff]").forEach(b =>
+    b.onclick = () => onPick(+b.dataset.eff));
 }
 
 /* progression: hold the load until the top of the range lands on two sets */
@@ -1109,15 +1183,48 @@ function progression(exId){
   const hits = working.filter(x => x.r >= def.rh).length;
   const shown = repList(atLoad2.map(x => x.r));   /* shown in the order you did them */
 
-  if(working.length >= 2 && hits >= 2){
+  /* How hard last session was, if it was rated at all. Every comparison here is
+     written so an unrated session fails it - undefined >= 9 and undefined <= 3
+     are both false - which is what lets the whole feature no-op against history
+     logged before effort existed. That is all of it. */
+  const E = last.effort;
+  const allOut = E >= 9, easy = E <= 3;
+
+  /* both promotion paths differ only in the reason they give */
+  const moveUp = why => {
     const next = load + def.inc;
     return {state:"ready", load:next, lines:[
       "Move up to " + loadPhrase(exId, next) + " today.",
-      "Your best two sets both hit " + def.rh + " reps last time — that's the trigger.",
+      why,
       "Reps reset. Work back up to " + def.rh + "."]};
+  };
+
+  if(working.length >= 2 && hits >= 2){
+    /* the one place effort overrides double progression outright */
+    if(allOut){
+      return {state:"hold", load, lines:[
+        "Stay at " + loadPhrase(exId, load) + " today.",
+        "Both sets hit " + def.rh + ", but you rated it all out — load on top of that buries you.",
+        "Own it at this weight first, then move up."]};
+    }
+    return moveUp("Your best two sets both hit " + def.rh + " reps last time — that's the trigger.");
   }
 
-  const scored = past.map(s => scoreAt(s, load)).filter(Boolean);   /* newest first */
+  /* One of two sets topped the range and it barely cost you: the load is the
+     limit, not you. The two-set guard is not optional - a single logged set is
+     not a scoreable session anywhere else in here, and without it one easy set
+     at the top promoted the load on its own. */
+  if(working.length >= 2 && hits === 1 && easy){
+    return moveUp("You reached " + def.rh
+      + " on a set and rated it easy — that's the load being too light.");
+  }
+
+  /* carry each session's effort onto its score, so the stall rule can read it */
+  const scored = [];
+  past.forEach(s => {
+    const sc = scoreAt(s, load);
+    if(sc){ sc.effort = s.effort; scored.push(sc); }
+  });
 
   /* anchor on the FIRST session that hit the best, so 18 → 18 → 18 → 18 reads as
      three sessions without progress instead of resetting on every tie */
@@ -1133,6 +1240,16 @@ function progression(exId){
     && scored[0].order[1] > scored[1].order[1];
 
   if(since >= 3 && !climbing){
+    /* Three coasting sessions is not a plateau, and "drop 10%" would be exactly
+       the wrong advice. One unrated session in the window fails the test and
+       falls through to the normal message, which is the safe direction. */
+    if(scored.slice(0, since).every(x => x.effort <= 3)){
+      return {state:"stall", load, lines:[
+        "No new best in " + since + " sessions at " + loadPhrase(exId, load)
+          + " — and you rated every one easy.",
+        "Best total: " + best.total + " reps (" + best.reps[0] + " + " + best.reps[1] + ").",
+        "The weight isn't the problem. Take a set closer to failure."]};
+    }
     return {state:"stall", load, lines:[
       "No new best in " + since + " sessions at " + loadPhrase(exId, load) + ".",
       "Best total: " + best.total + " reps (" + best.reps[0] + " + " + best.reps[1] + ").",
@@ -1144,7 +1261,14 @@ function progression(exId){
      the best rather than on last time, so hitting the target always registers as
      progress - a target that merely ties the best would read back as "no new best"
      the moment he hit it. */
-  const target = best ? best.reps.map(r => Math.min(r + 1, def.rh)) : null;
+  /* Normally one more rep on each counted set. After an all-out session that
+     still fell short, ask for one on the weaker set only - a smaller step is
+     the point of having rated it. */
+  const target = !best ? null
+    : (allOut && hits === 0
+        ? [Math.min(best.reps[0], def.rh),
+           Math.min(best.reps[1] + 1, def.rh)].sort((a,b) => b - a)
+        : best.reps.map(r => Math.min(r + 1, def.rh)));
 
   let pace;
   if(target){
@@ -1609,7 +1733,7 @@ function exHistoryBody(exId){
       <div class="card pad"><div class="target">${hintHTML(progression(exId))}</div></div>
       <div class="card">
         ${exHistory(exId).map(x => `<div class="hist-item">
-          <div class="hist-date">${fmtDate(x.date).toUpperCase()}</div>
+          <div class="hist-date">${fmtDate(x.date).toUpperCase()}${effortChip(x.effort)}</div>
           <div class="setline" style="margin-top:6px">
             ${x.sets.map(y => `<span class="setpill">${setLabel(exId, y)}</span>`).join("")}
           </div></div>`).join("") || '<div class="pad note">No sessions yet.</div>'}
@@ -1698,7 +1822,7 @@ function sessionCard(x){
     <div class="hist-title">${esc(sessName(x))}</div>
     <div class="hist-body">
       ${x.entries.map(e => `<div class="hist-line">
-        <span class="n">${esc((exById[e.ex]||{n:e.ex}).n)}</span>
+        <span class="n">${esc((exById[e.ex]||{n:e.ex}).n)}${effortChip(e.effort)}</span>
         ${setPills(e.ex, e.sets, true)}
       </div>`).join("")}
     </div>
@@ -2087,7 +2211,7 @@ function openProgramSheet(pgId){
   document.querySelector("[data-pgdup]").onclick = () => askText({
     title:"New program", line:"Copies " + p.n + "'s days and exercise lists, then makes it current.",
     value:p.n + " 2", yes:"Create program",
-    onYes(v){ duplicateProgram(p.id, v); },
+    onYes(v){ const np = duplicateProgram(p.id, v); if(np) openProgramSheet(np.id); },
     onNo:back,
   });
 
@@ -2223,7 +2347,7 @@ function openNewProgramSheet(){
       line:t.days.length
         ? t.days.length + " day" + (t.days.length===1?"":"s") + ": " + t.days.map(d => d.n).join(", ")
         : "You will add the days next.",
-      onYes(v){ makeProgram(v, t.days); },
+      onYes(v){ const np = makeProgram(v, t.days); if(np) openProgramSheet(np.id); },
       onNo(){ openNewProgramSheet(); },
     });
   });
@@ -2273,6 +2397,12 @@ function editSessionBody(sess){
         <span class="ed-val">${setLabel(e.ex, x)}</span>
         <span class="ed-go">Edit</span>
       </button>`).join("") || `<div class="ed-empty">No sets yet.</div>`}
+      <button class="ed-set" data-edeff="${e.ex}">
+        <span class="ed-num">EFF</span>
+        <span class="ed-val">${e.effort
+          ? e.effort + " · " + esc(effortName(e.effort)) : "not rated"}</span>
+        <span class="ed-go">Edit</span>
+      </button>
       <div style="padding:10px 12px 12px">
         <button class="btn btn-wide" data-edaddset="${e.ex}"
           style="min-height:42px;font-size:13.5px">+ Add set</button>
@@ -2320,6 +2450,7 @@ function wireEditSession(date){
     openSetEditor(date, p[0], +p[1]);
   });
   qq("[data-edaddset]").forEach(b => b.onclick = () => openSetEditor(date, b.dataset.edaddset, -1));
+  qq("[data-edeff]").forEach(b => b.onclick = () => openEffortSheet(date, b.dataset.edeff));
 
   qq("[data-edrmex]").forEach(b => b.onclick = () => {
     const sess = sessById(date); if(!sess) return;
@@ -2344,6 +2475,30 @@ function wireEditSession(date){
     if(!sess.entries.some(e => e.ex === id)) sess.entries.push({ex:id, sets:[]});
     save(); openSetEditor(date, id, -1);
   }, "Add to " + fmtDate(date), {onDismiss(){ openEditSession(date); }});
+}
+
+/* Rate, or fix a rating, on a session already logged. Same picker as the
+   Log it? sheet, so there is one place the scale is defined. */
+function openEffortSheet(date, exId){
+  const sess = sessById(date); if(!sess) return;
+  const e = sess.entries.find(x => x.ex === exId); if(!e) return;
+  const back = () => openEditSession(date);
+
+  const body = `<div style="padding:8px 16px 16px;display:flex;flex-direction:column;gap:13px">
+      ${effortPickerHTML(e.effort)}
+      ${e.effort ? `<button class="btn btn-wide" data-effclear="1">Clear the rating</button>` : ""}
+      <button class="btn btn-wide" data-effback="1">Cancel</button>
+    </div>`;
+
+  sheet((exById[exId] || {n:exId}).n, body, `<div class="queue-hero">
+      <div class="kicker">${esc(fmtDate(date))}</div>
+      <div class="line">How hard was this one?</div></div>`,
+    {dismissLabel:"Back", onDismiss:back});
+
+  wireEffortPicker(v => { e.effort = v; save(); back(); });
+  const clr = document.querySelector("[data-effclear]");
+  if(clr) clr.onclick = () => { delete e.effort; save(); back(); };
+  document.querySelector("[data-effback]").onclick = back;
 }
 
 /* idx -1 means a new set, prefilled from the last one on that exercise.
@@ -2970,6 +3125,7 @@ function openConfirmSheet(exId){
         ${n ? e.sets.map(x => `<span class="setpill">${setLabel(exId, x)}</span>`).join("")
             : `<span class="note" style="color:var(--muted)">Nothing logged — this one won't be saved.</span>`}
       </div>
+      ${n ? effortPickerHTML(e && e.effort, "How hard was that?") : ""}
       <button class="btn btn-primary btn-wide" data-confirm="1">Confirm · pick next</button>
       <button class="btn btn-wide" data-closesheet2="1">Keep going</button>
     </div>`;
@@ -2979,12 +3135,22 @@ function openConfirmSheet(exId){
       <div class="line">${n ? "Look right? Confirm and I'll bring the grid back." : "You can still log a set, or drop this one."}</div>
     </div>`);
 
-  document.querySelector("[data-confirm]").onclick = () => {
+  /* Rating and confirming are the same tap - the confirm is one you already
+     make, so an effort rating costs nothing extra. Skipping it still works:
+     the plain Confirm button behaves exactly as it did before. */
+  const confirmAndNext = () => {
     const cur = workingSession();
     if(!cur){ closeSheet(); render(); return; }
     cur.entries = cur.entries.filter(x => x.sets.length);
     ui.openEx = null; stopRest(); save(); closeSheet(); render();
   };
+  wireEffortPicker(v => {
+    const cur = workingSession();
+    const en = cur && cur.entries.find(x => x.ex === exId);
+    if(en) en.effort = v;
+    confirmAndNext();
+  });
+  document.querySelector("[data-confirm]").onclick = confirmAndNext;
   document.querySelector("[data-closesheet2]").onclick = closeSheet;
 }
 
