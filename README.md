@@ -6,14 +6,23 @@ Live at: https://brandcastle.github.io/prmax/
 
 ## What it does
 
-- **Train** — pick a day (Upper / Lower–Quad / Lower–Glute / Arms / Abs / Cardio), work through
-  that day's exercises, log sets one at a time.
+- **Train** — pick one of your program's days, work through its exercises, log sets one at a
+  time.
+- **Programs** — a training block: a split, its days, and the exercises in each day. One is
+  current at a time. Start a new block from a copy, from a ready-made split, or empty. Switching
+  blocks never touches a set you have logged, and your progression carries across, because that
+  follows the exercise rather than the program.
 - **Double progression** — hold the load until you hit the top of the rep range on two sets,
   then add weight. The app tracks this per exercise and tells you when you've earned the jump,
   or flags a lift as stalled.
-- **Volume** — direct sets per muscle for the current calendar week, against targets you set.
-- **Log** — a calendar of training days and a session list.
-- **Setup** — edit your day templates, weekly targets, rest timer, name, and theme.
+- **Effort** — rate each exercise 1–10 when you finish it. A session you rated all out holds the
+  load instead of adding to it; one you rated easy can move the weight up sooner. It shows you
+  what the rating will do before you commit it, and nothing changes until you start rating.
+- **Volume** — direct sets per muscle for the current calendar week, against targets you set,
+  with secondary work counted separately.
+- **Log** — a calendar of training days and a session list. Any past session can be edited:
+  change a set's weight or reps, add one you forgot, or drop an exercise.
+- **Setup** — your programs and their days, weekly targets, rest timer, name, and theme.
 
 ## Where the data lives
 

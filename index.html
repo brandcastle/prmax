@@ -35,6 +35,8 @@
   --stall:#A63A27;
   --indirect:#3E6FA8;
   --stall-soft:#F7E0DA;
+  --bloom:rgba(166,58,39,.42);
+  --eff-grid:rgba(18,21,15,.30);
   --shadow:0 1px 2px rgba(18,21,15,.08),0 6px 18px rgba(18,21,15,.05);
 
   --f-disp:"Barlow Condensed","Oswald","Arial Narrow",sans-serif;
@@ -63,6 +65,8 @@
     --stall:#F0907A;
     --indirect:#8FBCE8;
     --stall-soft:#40201A;
+    --bloom:rgba(240,144,122,.42);
+    --eff-grid:rgba(245,245,245,.34);
     --shadow:0 1px 2px rgba(0,0,0,.45),0 6px 18px rgba(0,0,0,.3);
   }
 }
@@ -87,6 +91,8 @@
   --stall:#F0907A;
   --indirect:#8FBCE8;
   --stall-soft:#40201A;
+  --bloom:rgba(240,144,122,.42);
+  --eff-grid:rgba(245,245,245,.34);
   --shadow:0 1px 2px rgba(0,0,0,.45),0 6px 18px rgba(0,0,0,.3);
 }
 
@@ -427,7 +433,10 @@ button{font:inherit;color:inherit;cursor:pointer}
 .eff{display:flex;flex-direction:column;gap:9px}
 .eff-lab{font-family:var(--f-mono);font-size:11px;font-weight:600;letter-spacing:.1em;
   text-transform:uppercase;color:var(--muted)}
-.eff-bars{display:flex;align-items:flex-end;gap:3px;height:60px}
+/* touch-action:none so a drag across the bars rates instead of scrolling the
+   sheet. Sixty pixels of a scrollable sheet is a fair trade for being able to
+   slide to a value with sweaty hands. */
+.eff-bars{display:flex;align-items:flex-end;gap:3px;height:60px;touch-action:none}
 .eff-bar{flex:1;min-width:0;height:100%;display:flex;align-items:flex-end;justify-content:center;
   border:0;background:none;padding:0;cursor:pointer;-webkit-tap-highlight-color:transparent}
 .eff-bar span{display:block;width:100%;border-radius:4px 4px 3px 3px;
@@ -438,20 +447,99 @@ button{font:inherit;color:inherit;cursor:pointer}
 .eff-bar.band2 span{background:var(--hold-soft)}
 .eff-bar.band3 span{background:var(--stall-soft)}
 /* the one you picked goes solid, the way the reference does it */
+/* Each bar carries its own band colour, so the wave changes hue as it climbs
+   the ramp. The overlay pulses to that solid colour and the per-bar delay makes
+   it read as one wave travelling left to right rather than ten blinks. */
+.eff-bar.band0{color:var(--ready)}
+.eff-bar.band1{color:var(--accent)}
+.eff-bar.band2{color:var(--hold)}
+.eff-bar.band3{color:var(--stall)}
+.eff-bar span{position:relative;overflow:hidden}
+.eff-bar span::after{content:"";position:absolute;inset:0;border-radius:inherit;
+  background:currentColor;opacity:0}
+@keyframes barwave{0%,100%{opacity:0}45%{opacity:.62}}
+.eff.lvl0 .eff-bar.lit span::after{animation:barwave 3.2s ease-in-out infinite;
+  animation-delay:calc(var(--i) * 240ms)}
+.eff.lvl1 .eff-bar.lit span::after{animation:barwave 2.4s ease-in-out infinite;
+  animation-delay:calc(var(--i) * 180ms)}
+.eff.lvl2 .eff-bar.lit span::after{animation:barwave 1.7s ease-in-out infinite;
+  animation-delay:calc(var(--i) * 130ms)}
+.eff.lvl3 .eff-bar.lit span::after{animation:barwave 1.15s ease-in-out infinite;
+  animation-delay:calc(var(--i) * 90ms)}
+/* the one you picked holds steady while the rest ripple past it */
+.eff-bar.on span::after{animation:none!important}
 .eff-bar.band0.on span{background:var(--ready)}
 .eff-bar.band1.on span{background:var(--accent)}
 .eff-bar.band2.on span{background:var(--hold)}
 .eff-bar.band3.on span{background:var(--stall)}
-.eff-read{display:flex;align-items:center;gap:9px;min-height:28px}
-.eff-num{flex:0 0 auto;width:28px;height:28px;border-radius:50%;display:flex;
-  align-items:center;justify-content:center;font-family:var(--f-disp);font-size:15px;
-  font-weight:700;background:var(--surface-2);color:var(--muted)}
-.eff-num.band0{background:var(--ready-soft);color:var(--ready)}
-.eff-num.band1{background:var(--accent-soft);color:var(--accent)}
-.eff-num.band2{background:var(--hold-soft);color:var(--hold)}
-.eff-num.band3{background:var(--stall-soft);color:var(--stall)}
-.eff-word{font-size:15px;font-weight:600}
-.eff-hint{font-weight:400;font-size:13px;color:var(--muted)}
+.eff-strip{position:relative;overflow:hidden;border-radius:11px;min-height:64px;
+  display:flex;align-items:center;gap:12px;padding:11px 14px;
+  background:var(--surface-2);border:1px solid var(--line)}
+.eff-strip .n{flex:0 0 auto;width:40px;height:40px;border-radius:10px;position:relative;z-index:2;
+  display:flex;align-items:center;justify-content:center;background:var(--surface);
+  border:1.5px solid currentColor;font-family:var(--f-disp);font-size:20px;font-weight:700}
+.eff-strip .t{position:relative;z-index:2;min-width:0}
+.eff-strip .w{font-family:var(--f-mono);font-size:11px;font-weight:600;letter-spacing:.12em;
+  text-transform:uppercase;line-height:1.2}
+.eff-strip .s{font-size:13.5px;color:var(--muted);line-height:1.35;margin-top:2px}
+.eff-strip.empty .s{font-size:14px}
+/* The Ultracode texture, measured off Brandon's screen recording rather than
+   guessed at: 1px gutters every 5px in both axes, so 4px cells - a grid, not
+   the checkerboard the first attempt used. Revealed by a mask that sweeps. */
+.eff-strip::before{content:"";position:absolute;inset:0;z-index:1;pointer-events:none;opacity:0;
+  background-image:
+    repeating-linear-gradient(90deg,var(--eff-grid) 0 1px,transparent 1px 5px),
+    repeating-linear-gradient(0deg, var(--eff-grid) 0 1px,transparent 1px 5px);
+  -webkit-mask-image:linear-gradient(100deg,transparent 32%,#000 44%,#000 56%,transparent 68%);
+          mask-image:linear-gradient(100deg,transparent 32%,#000 44%,#000 56%,transparent 68%);
+  -webkit-mask-size:300% 100%;  mask-size:300% 100%;
+  -webkit-mask-position:140% 0; mask-position:140% 0}
+@keyframes effsweep{
+  from{-webkit-mask-position:140% 0; mask-position:140% 0}
+  to  {-webkit-mask-position:-60% 0; mask-position:-60% 0}}
+.eff-strip.band0::before{opacity:.16;animation:effsweep 7s linear infinite}
+.eff-strip.band1::before{opacity:.24;animation:effsweep 5.2s linear infinite}
+.eff-strip.band2::before{opacity:.34;animation:effsweep 3.6s linear infinite}
+.eff-strip.band3::before{opacity:.46;animation:effsweep 2.2s linear infinite}
+.eff-last{font-family:var(--f-mono);font-size:12px;color:var(--faint);
+  margin-top:-3px;letter-spacing:.02em}
+.eff-next{font-family:var(--f-mono);font-size:12.5px;font-weight:600;color:var(--muted);
+  margin-top:-6px;letter-spacing:.02em}
+.eff-next:empty{display:none}
+.eff-fl{flex:0 0 auto;margin-left:auto;position:relative;z-index:2;width:32px;height:38px}
+.eff-fl svg{display:block;width:100%;height:100%}
+/* No doctype on this document, so it renders in quirks mode and CSS class
+   matching is case-INSENSITIVE. Frame and part classes must therefore differ by
+   more than case - .fB was silently matching .fb and hiding every body pixel. */
+.eff-fl .flm-b{fill:currentColor;opacity:.92}
+.eff-fl .flm-c{fill:currentColor;opacity:.3}
+.eff-fl .flm-s{fill:currentColor;opacity:.5}
+.eff-fl .flm-two{opacity:0}
+@keyframes flmOne{0%,49%{opacity:1}50%,100%{opacity:0}}
+@keyframes flmTwo{0%,49%{opacity:0}50%,100%{opacity:1}}
+.eff-strip.band0 .flm-one{animation:flmOne 1.6s steps(1) infinite}
+.eff-strip.band0 .flm-two{animation:flmTwo 1.6s steps(1) infinite}
+.eff-strip.band1 .flm-one{animation:flmOne 1.1s steps(1) infinite}
+.eff-strip.band1 .flm-two{animation:flmTwo 1.1s steps(1) infinite}
+.eff-strip.band2 .flm-one{animation:flmOne .72s steps(1) infinite}
+.eff-strip.band2 .flm-two{animation:flmTwo .72s steps(1) infinite}
+.eff-strip.band3 .flm-one{animation:flmOne .44s steps(1) infinite}
+.eff-strip.band3 .flm-two{animation:flmTwo .44s steps(1) infinite}
+.eff-strip.band0{background:var(--ready-soft);border-color:var(--ready)}
+.eff-strip.band0 .n,.eff-strip.band0 .w,.eff-strip.band0 .eff-fl{color:var(--ready)}
+.eff-strip.band1{background:var(--accent-soft);border-color:var(--accent)}
+.eff-strip.band1 .n,.eff-strip.band1 .w,.eff-strip.band1 .eff-fl{color:var(--accent)}
+.eff-strip.band2{background:var(--hold-soft);border-color:var(--hold)}
+.eff-strip.band2 .n,.eff-strip.band2 .w,.eff-strip.band2 .eff-fl{color:var(--hold)}
+.eff-strip.band3{background:var(--stall-soft);border-color:var(--stall);
+  box-shadow:0 0 16px -6px var(--stall)}
+.eff-strip.band3 .n,.eff-strip.band3 .w,.eff-strip.band3 .eff-fl{color:var(--stall)}
+/* ten gets one moment, on the card rather than the strip. Once, then done. */
+@keyframes bloom{
+  0%{box-shadow:0 0 0 0 var(--bloom)}
+  70%{box-shadow:0 0 0 18px transparent}
+  100%{box-shadow:0 0 0 0 transparent}}
+.sheet-card.bloom{animation:bloom .85s ease-out}
 .eff-chip{display:inline-block;font-family:var(--f-mono);font-size:10px;font-weight:600;
   padding:1px 5px;border-radius:5px;background:var(--surface-2);color:var(--muted);
   white-space:nowrap;vertical-align:1px}
@@ -543,7 +631,7 @@ textarea{width:100%;min-height:150px;font-family:var(--f-mono);font-size:12px;
    ====================================================================== */
 
 const KEY = "ironledger.v1";
-const BUILD = "2026.09.03.25";   /* keep in step with version.txt */
+const BUILD = "2026.09.04.29";   /* keep in step with version.txt */
 
 /* ---------------- exercise library ---------------- */
 const EX = [
@@ -1107,28 +1195,131 @@ const EFFORT_BANDS = [
   {lo:7, hi:8,  n:"Hard"},
   {lo:9, hi:10, n:"All Out"},
 ];
+/* What each number means, described by feel rather than reps left - the same
+   reason the scale is not reps-in-reserve: it has to mean something on a
+   Stairmaster too. Index 1-10. */
+const EFFORT_SAY = ["",
+  "Barely noticed it.", "Warm-up effort.", "Easy throughout.",
+  "Comfortable.", "Working now.", "Solid effort.",
+  "Hard. Had to focus.", "Very hard. Close to the limit.",
+  "Almost everything.", "Nothing left."];
+/* One 8-bit flame per band, drawn on a 10x12 cell grid with crispEdges so the
+   pixels stay pixels. Two frames each - the flicker is a frame swap, the way a
+   sprite flickers, not a tween. Body takes currentColor so a flame inherits its
+   band colour and needs no second set for dark mode. */
+const EFFORT_FLAME = [
+  `<svg viewBox="0 0 10 12" shape-rendering="crispEdges" aria-hidden="true"><g class="flm-one"><rect class="flm-b" x="5" y="8" width="1" height="1"/><rect class="flm-b" x="4" y="9" width="3" height="1"/><rect class="flm-b" x="4" y="10" width="3" height="1"/><rect class="flm-b" x="5" y="11" width="2" height="1"/></g><g class="flm-two"><rect class="flm-b" x="4" y="8" width="1" height="1"/><rect class="flm-b" x="4" y="9" width="3" height="1"/><rect class="flm-b" x="4" y="10" width="3" height="1"/><rect class="flm-b" x="5" y="11" width="2" height="1"/></g></svg>`,
+  `<svg viewBox="0 0 10 12" shape-rendering="crispEdges" aria-hidden="true"><g class="flm-one"><rect class="flm-b" x="5" y="5" width="1" height="1"/><rect class="flm-b" x="4" y="6" width="2" height="1"/><rect class="flm-b" x="4" y="7" width="3" height="1"/><rect class="flm-b" x="3" y="8" width="4" height="1"/><rect class="flm-b" x="3" y="9" width="4" height="1"/><rect class="flm-b" x="3" y="10" width="4" height="1"/><rect class="flm-b" x="4" y="11" width="3" height="1"/><rect class="flm-c" x="4" y="10" width="2" height="1"/><rect class="flm-c" x="5" y="11" width="1" height="1"/></g><g class="flm-two"><rect class="flm-b" x="4" y="5" width="1" height="1"/><rect class="flm-b" x="4" y="6" width="2" height="1"/><rect class="flm-b" x="3" y="7" width="3" height="1"/><rect class="flm-b" x="3" y="8" width="4" height="1"/><rect class="flm-b" x="3" y="9" width="5" height="1"/><rect class="flm-b" x="3" y="10" width="4" height="1"/><rect class="flm-b" x="4" y="11" width="3" height="1"/><rect class="flm-c" x="4" y="10" width="2" height="1"/><rect class="flm-c" x="5" y="11" width="1" height="1"/></g></svg>`,
+  `<svg viewBox="0 0 10 12" shape-rendering="crispEdges" aria-hidden="true"><g class="flm-one"><rect class="flm-b" x="5" y="2" width="1" height="1"/><rect class="flm-b" x="4" y="3" width="2" height="1"/><rect class="flm-b" x="4" y="4" width="3" height="1"/><rect class="flm-b" x="3" y="5" width="4" height="1"/><rect class="flm-b" x="3" y="6" width="4" height="1"/><rect class="flm-b" x="2" y="7" width="5" height="1"/><rect class="flm-b" x="2" y="8" width="6" height="1"/><rect class="flm-b" x="2" y="9" width="6" height="1"/><rect class="flm-b" x="3" y="10" width="5" height="1"/><rect class="flm-b" x="3" y="11" width="4" height="1"/><rect class="flm-c" x="4" y="8" width="2" height="1"/><rect class="flm-c" x="4" y="9" width="3" height="1"/><rect class="flm-c" x="4" y="10" width="3" height="1"/><rect class="flm-c" x="4" y="11" width="2" height="1"/></g><g class="flm-two"><rect class="flm-b" x="4" y="2" width="1" height="1"/><rect class="flm-b" x="4" y="3" width="2" height="1"/><rect class="flm-b" x="3" y="4" width="3" height="1"/><rect class="flm-b" x="3" y="5" width="4" height="1"/><rect class="flm-b" x="2" y="6" width="5" height="1"/><rect class="flm-b" x="2" y="7" width="5" height="1"/><rect class="flm-b" x="2" y="8" width="6" height="1"/><rect class="flm-b" x="2" y="9" width="6" height="1"/><rect class="flm-b" x="2" y="10" width="6" height="1"/><rect class="flm-b" x="3" y="11" width="4" height="1"/><rect class="flm-c" x="4" y="8" width="2" height="1"/><rect class="flm-c" x="4" y="9" width="3" height="1"/><rect class="flm-c" x="4" y="10" width="3" height="1"/><rect class="flm-c" x="4" y="11" width="2" height="1"/></g></svg>`,
+  `<svg viewBox="0 0 10 12" shape-rendering="crispEdges" aria-hidden="true"><g class="flm-one"><rect class="flm-b" x="5" y="0" width="1" height="1"/><rect class="flm-b" x="4" y="1" width="2" height="1"/><rect class="flm-b" x="4" y="2" width="2" height="1"/><rect class="flm-b" x="3" y="3" width="3" height="1"/><rect class="flm-b" x="3" y="4" width="4" height="1"/><rect class="flm-b" x="2" y="5" width="5" height="1"/><rect class="flm-b" x="2" y="6" width="6" height="1"/><rect class="flm-b" x="1" y="7" width="7" height="1"/><rect class="flm-b" x="1" y="8" width="7" height="1"/><rect class="flm-b" x="1" y="9" width="7" height="1"/><rect class="flm-b" x="2" y="10" width="6" height="1"/><rect class="flm-b" x="3" y="11" width="4" height="1"/><rect class="flm-c" x="4" y="8" width="2" height="1"/><rect class="flm-c" x="3" y="9" width="3" height="1"/><rect class="flm-c" x="4" y="10" width="3" height="1"/><rect class="flm-c" x="4" y="11" width="2" height="1"/><rect class="flm-s" x="8" y="2" width="1" height="1"/><rect class="flm-s" x="0" y="5" width="1" height="1"/></g><g class="flm-two"><rect class="flm-b" x="4" y="0" width="1" height="1"/><rect class="flm-b" x="4" y="1" width="2" height="1"/><rect class="flm-b" x="3" y="2" width="3" height="1"/><rect class="flm-b" x="3" y="3" width="3" height="1"/><rect class="flm-b" x="2" y="4" width="4" height="1"/><rect class="flm-b" x="2" y="5" width="5" height="1"/><rect class="flm-b" x="1" y="6" width="6" height="1"/><rect class="flm-b" x="1" y="7" width="7" height="1"/><rect class="flm-b" x="1" y="8" width="7" height="1"/><rect class="flm-b" x="1" y="9" width="7" height="1"/><rect class="flm-b" x="1" y="10" width="7" height="1"/><rect class="flm-b" x="3" y="11" width="4" height="1"/><rect class="flm-c" x="3" y="8" width="2" height="1"/><rect class="flm-c" x="4" y="9" width="3" height="1"/><rect class="flm-c" x="4" y="10" width="3" height="1"/><rect class="flm-c" x="4" y="11" width="2" height="1"/><rect class="flm-s" x="8" y="1" width="1" height="1"/><rect class="flm-s" x="0" y="4" width="1" height="1"/></g></svg>`
+];
+
+
 const effortBand = v => EFFORT_BANDS.findIndex(b => v >= b.lo && v <= b.hi);
 const effortName = v => (EFFORT_BANDS[effortBand(v)] || {n:""}).n;
 const effortChip = v => v
   ? ` <span class="eff-chip band${effortBand(v)}">${v} ${esc(effortName(v))}</span>` : "";
 
+/* What you called it last time, for calibration - the hard part of any effort
+   scale is being consistent with your own past self. Same date guards as
+   progression(), so a session still being logged never counts as history. */
+/* One short line saying what this rating does to tomorrow. Recomputed as you
+   drag, so the scale teaches itself: watch the load jump vanish when you rate a
+   session all out. */
+function nextSessionLine(exId, effort){
+  const s = workingSession();
+  const e = s && s.entries.find(x => x.ex === exId);
+  if(!e || !e.sets.length || isTime(exId)) return "";
+  const p = progression(exId, {sets:e.sets, effort});
+  if(p.state === "ready") return "Next session: " + loadPhrase(exId, p.load);
+  if(p.state === "stall") return "Next session: flagged as stalled";
+  if(p.state === "hold")
+    return p.target
+      ? "Next session: go for " + p.target.join(" and ")
+      : "Next session: stay at " + loadPhrase(exId, p.load);
+  return "";
+}
+
+function lastEffortLine(exId){
+  const ws = workingSession();
+  const prev = exHistory(exId).find(x =>
+    x.effort && x.date !== todayISO() && !(ws && x.date === ws.date));
+  return prev
+    ? `<div class="eff-last">Last time you rated this ${prev.effort} \u00b7 `
+      + esc(effortName(prev.effort)) + `</div>`
+    : "";
+}
+
 function effortPickerHTML(cur, label){
-  return `<div class="eff">
+  return `<div class="eff${cur ? " lvl" + effortBand(cur) : ""}">
       ${label ? `<div class="eff-lab">${esc(label)}</div>` : ""}
       <div class="eff-bars">
-        ${[1,2,3,4,5,6,7,8,9,10].map(v => `<button class="eff-bar band${effortBand(v)}${cur===v?" on":""}"
-          data-eff="${v}" aria-label="${v} out of 10, ${esc(effortName(v))}"
+        ${[1,2,3,4,5,6,7,8,9,10].map(v => `<button class="eff-bar band${effortBand(v)}${cur===v?" on":""}${cur && v < cur ? " lit" : ""}"
+          data-eff="${v}" aria-label="${v} out of 10, ${esc(effortName(v))}" style="--i:${v-1}"
           ><span style="height:${Math.round(12 + v*4.8)}px"></span></button>`).join("")}
       </div>
-      <div class="eff-read">${cur
-        ? `<span class="eff-num band${effortBand(cur)}">${cur}</span>
-           <span class="eff-word">${esc(effortName(cur))}</span>`
-        : `<span class="eff-word eff-hint">Tap to rate</span>`}</div>
+      ${cur ? `<div class="eff-strip band${effortBand(cur)}">
+          <div class="n">${cur}</div>
+          <div class="t">
+            <div class="w">${esc(effortName(cur))}</div>
+            <div class="s">${esc(EFFORT_SAY[cur] || "")}</div>
+          </div>
+          <div class="eff-fl">${EFFORT_FLAME[effortBand(cur)]}</div>
+        </div>`
+        : `<div class="eff-strip empty">
+            <div class="t"><div class="s">Tap a bar to rate this one.</div></div>
+          </div>`}
     </div>`;
 }
-function wireEffortPicker(onPick){
+
+/* Repaint in place rather than re-rendering the sheet: deliberating between 7
+   and 8 should not move anything under your thumb. */
+function mountEffortPicker(cur, label, onPick){
+  const host = document.querySelector(".eff");
+  if(!host) return;
+  host.outerHTML = effortPickerHTML(cur, label);
   document.querySelectorAll("[data-eff]").forEach(b =>
     b.onclick = () => onPick(+b.dataset.eff));
+  wireEffortDrag(cur, onPick);
+}
+
+/* Slide a thumb along the row rather than hitting one 31px bar. The listeners
+   live on document, not on the row, because onPick repaints the picker and
+   would otherwise tear out the node mid-drag. The row's rect is measured once
+   at pointerdown for the same reason. A plain tap is left to the button's own
+   click handler - this only fires once you actually move. */
+function wireEffortDrag(cur, onPick){
+  const row = document.querySelector(".eff-bars");
+  if(!row) return;
+  row.addEventListener("pointerdown", ev => {
+    const rect = row.getBoundingClientRect();
+    let last = cur;
+    const move = e => {
+      e.preventDefault();
+      const i = Math.floor((e.clientX - rect.left) / (rect.width / 10));
+      const v = Math.max(1, Math.min(10, i + 1));
+      if(v !== last){ last = v; onPick(v); }
+    };
+    const end = () => {
+      document.removeEventListener("pointermove", move);
+      document.removeEventListener("pointerup", end);
+      document.removeEventListener("pointercancel", end);
+    };
+    document.addEventListener("pointermove", move);
+    document.addEventListener("pointerup", end);
+    document.addEventListener("pointercancel", end);
+  });
+}
+
+/* ten only */
+function effortBloom(v){
+  if(v !== 10) return;
+  const card = document.querySelector(".sheet-card");
+  if(!card) return;
+  card.classList.remove("bloom");
+  void card.offsetWidth;                 /* force a reflow so it can replay */
+  card.classList.add("bloom");
+  setTimeout(() => card.classList.remove("bloom"), 900);
 }
 
 /* progression: hold the load until the top of the range lands on two sets */
@@ -1158,12 +1349,20 @@ function scoreAt(sess, load){
 /* total first, then the weaker set: 10/8 beats 11/7 */
 const beatsScore = (a,b) => !b || a.total > b.total || (a.total === b.total && a.min > b.min);
 
-function progression(exId){
+/* `assume` lets a caller ask a hypothetical: treat the session being logged
+   right now as finished, with this effort, and say what you would advise next
+   time. The effort picker uses it to show the consequence of the rating while
+   you are still choosing it. One rule table, so the preview cannot disagree
+   with what actually happens tomorrow. */
+function progression(exId, assume){
   const def = defFor(exId), h = exHistory(exId);
   /* a session carried past midnight is dated yesterday but is still being logged
      into — scoring it as finished history would change the advice mid-workout */
   const ws = workingSession();
   const past = h.filter(s => s.date !== todayISO() && !(ws && s.date === ws.date));
+  /* newest first, so the assumed session goes on the front */
+  if(assume && assume.sets && assume.sets.length)
+    past.unshift({date:todayISO(), sets:assume.sets, effort:assume.effort});
 
   if(isTime(exId)){
     return past.length
@@ -1281,7 +1480,7 @@ function progression(exId){
     pace = gap + (gap === 1 ? " rep" : " reps") + " to go on your best set.";
   }
 
-  return {state:"hold", load, lines:[
+  return {state:"hold", load, target, lines:[
     "Keep " + loadPhrase(exId, load) + " this session.",
     "Last time: " + shown + (best
       ? (since === 0
@@ -2484,9 +2683,11 @@ function openEffortSheet(date, exId){
   const e = sess.entries.find(x => x.ex === exId); if(!e) return;
   const back = () => openEditSession(date);
 
-  const body = `<div style="padding:8px 16px 16px;display:flex;flex-direction:column;gap:13px">
-      ${effortPickerHTML(e.effort)}
-      ${e.effort ? `<button class="btn btn-wide" data-effclear="1">Clear the rating</button>` : ""}
+  let sel = e.effort;
+  const body = `<div style="padding:8px 16px 16px;display:flex;flex-direction:column;gap:11px">
+      ${effortPickerHTML(sel, "Rate Your Effort")}
+      <button class="btn btn-primary btn-wide" data-effsave="1" style="min-height:50px">Save</button>
+      <button class="btn btn-wide" data-effclear="1">Clear the rating</button>
       <button class="btn btn-wide" data-effback="1">Cancel</button>
     </div>`;
 
@@ -2495,9 +2696,18 @@ function openEffortSheet(date, exId){
       <div class="line">How hard was this one?</div></div>`,
     {dismissLabel:"Back", onDismiss:back});
 
-  wireEffortPicker(v => { e.effort = v; save(); back(); });
-  const clr = document.querySelector("[data-effclear]");
-  if(clr) clr.onclick = () => { delete e.effort; save(); back(); };
+  /* nothing is written until Save, so you can move between 7 and 8 freely */
+  const repaint = v => {
+    mountEffortPicker(v, "Rate Your Effort", pick);
+    effortBloom(v);
+  };
+  function pick(v){ sel = v; repaint(sel); }
+  mountEffortPicker(sel, "Rate Your Effort", pick);
+  document.querySelector("[data-effsave]").onclick = () => {
+    if(sel) e.effort = sel; else delete e.effort;
+    save(); back();
+  };
+  document.querySelector("[data-effclear]").onclick = () => { sel = null; repaint(null); };
   document.querySelector("[data-effback]").onclick = back;
 }
 
@@ -3125,7 +3335,9 @@ function openConfirmSheet(exId){
         ${n ? e.sets.map(x => `<span class="setpill">${setLabel(exId, x)}</span>`).join("")
             : `<span class="note" style="color:var(--muted)">Nothing logged — this one won't be saved.</span>`}
       </div>
-      ${n ? effortPickerHTML(e && e.effort, "How hard was that?") : ""}
+      ${n ? effortPickerHTML((e && e.effort) || 6, "Rate Your Effort") : ""}
+      ${lastEffortLine(exId)}
+      ${n ? `<div class="eff-next" id="effNext"></div>` : ""}
       <button class="btn btn-primary btn-wide" data-confirm="1">Confirm · pick next</button>
       <button class="btn btn-wide" data-closesheet2="1">Keep going</button>
     </div>`;
@@ -3135,21 +3347,45 @@ function openConfirmSheet(exId){
       <div class="line">${n ? "Look right? Confirm and I'll bring the grid back." : "You can still log a set, or drop this one."}</div>
     </div>`);
 
-  /* Rating and confirming are the same tap - the confirm is one you already
-     make, so an effort rating costs nothing extra. Skipping it still works:
-     the plain Confirm button behaves exactly as it did before. */
+  /* Tapping a bar SELECTS. It used to confirm and close in the same tap, which
+     cost nothing but left nowhere to think - and choosing between 7 and 8 is the
+     whole value of rating it. Confirm is the second tap, and skipping the rating
+     entirely still works exactly as it did. */
+  /* Opens on 6 so there is something to adjust from rather than a blank. That 6
+     is not written by opening the sheet - only by confirming - so backing out
+     with Keep going leaves the exercise genuinely unrated. */
+  let sel = (e && e.effort) || 6;
   const confirmAndNext = () => {
     const cur = workingSession();
     if(!cur){ closeSheet(); render(); return; }
+    const en = cur.entries.find(x => x.ex === exId);
+    if(en && en.sets.length && !en.effort) en.effort = sel;
     cur.entries = cur.entries.filter(x => x.sets.length);
     ui.openEx = null; stopRest(); save(); closeSheet(); render();
   };
-  wireEffortPicker(v => {
+  function paintEffort(v){
+    sel = v;
+    mountEffortPicker(v, "Rate Your Effort", pickEffort);
+    const nx = document.getElementById("effNext");
+    if(nx) nx.textContent = nextSessionLine(exId, v);
+    const btn = document.querySelector("[data-confirm]");
+    if(btn) btn.textContent = "Confirm \u00b7 " + v + " " + effortName(v);
+    effortBloom(v);
+  }
+  function pickEffort(v){
     const cur = workingSession();
     const en = cur && cur.entries.find(x => x.ex === exId);
     if(en) en.effort = v;
-    confirmAndNext();
-  });
+    save();
+    paintEffort(v);
+  }
+  if(n){
+    mountEffortPicker(sel, "Rate Your Effort", pickEffort);
+    const nx0 = document.getElementById("effNext");
+    if(nx0) nx0.textContent = nextSessionLine(exId, sel);
+    const btn0 = document.querySelector("[data-confirm]");
+    if(btn0) btn0.textContent = "Confirm \u00b7 " + sel + " " + effortName(sel);
+  }
   document.querySelector("[data-confirm]").onclick = confirmAndNext;
   document.querySelector("[data-closesheet2]").onclick = closeSheet;
 }
